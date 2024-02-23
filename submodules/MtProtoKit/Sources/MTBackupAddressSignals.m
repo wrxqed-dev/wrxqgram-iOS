@@ -289,7 +289,7 @@ static NSString *makeRandomPadding() {
     apiEnvironment.apiId = currentContext.apiEnvironment.apiId;
     apiEnvironment.layer = currentContext.apiEnvironment.layer;
     apiEnvironment = [apiEnvironment withUpdatedLangPackCode:currentContext.apiEnvironment.langPackCode];
-    apiEnvironment.disableUpdates = true;
+    apiEnvironment.disableUpdates = false;
     apiEnvironment.langPack = currentContext.apiEnvironment.langPack;
     
     MTContext *context = [[MTContext alloc] initWithSerialization:currentContext.serialization encryptionProvider:currentContext.encryptionProvider apiEnvironment:apiEnvironment isTestingEnvironment:currentContext.isTestingEnvironment useTempAuthKeys:false];
