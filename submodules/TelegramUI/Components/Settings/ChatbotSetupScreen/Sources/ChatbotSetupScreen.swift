@@ -21,6 +21,8 @@ import ListTextFieldItemComponent
 import BundleIconComponent
 import LottieComponent
 import Markdown
+import PeerListItemComponent
+import AvatarNode
 
 private let checkIcon: UIImage = {
     return generateImage(CGSize(width: 12.0, height: 10.0), rotatedContext: { size, context in
@@ -39,11 +41,14 @@ final class ChatbotSetupScreenComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
     
     let context: AccountContext
+    let initialData: ChatbotSetupScreen.InitialData
 
     init(
-        context: AccountContext
+        context: AccountContext,
+        initialData: ChatbotSetupScreen.InitialData
     ) {
         self.context = context
+        self.initialData = initialData
     }
 
     static func ==(lhs: ChatbotSetupScreenComponent, rhs: ChatbotSetupScreenComponent) -> Bool {
@@ -60,6 +65,51 @@ final class ChatbotSetupScreenComponent: Component {
         }
     }
     
+    private struct BotResolutionState: Equatable {
+        enum State: Equatable {
+            case searching
+            case notFound
+            case found(peer: EnginePeer, isInstalled: Bool)
+        }
+        
+        var query: String
+        var state: State
+        
+        init(query: String, state: State) {
+            self.query = query
+            self.state = state
+        }
+    }
+    
+    struct AdditionalPeerList {
+        enum Category: Int {
+            case newChats = 0
+            case existingChats = 1
+            case contacts = 2
+            case nonContacts = 3
+        }
+        
+        struct Peer {
+            var peer: EnginePeer
+            var isContact: Bool
+            
+            init(peer: EnginePeer, isContact: Bool) {
+                self.peer = peer
+                self.isContact = isContact
+            }
+        }
+        
+        var categories: Set<Category>
+        var peers: [Peer]
+        var excludePeers: [Peer]
+        
+        init(categories: Set<Category>, peers: [Peer], excludePeers: [Peer]) {
+            self.categories = categories
+            self.peers = peers
+            self.excludePeers = excludePeers
+        }
+    }
+    
     final class View: UIView, UIScrollViewDelegate {
         private let topOverscrollLayer = SimpleLayer()
         private let scrollView: ScrollView
@@ -70,6 +120,7 @@ final class ChatbotSetupScreenComponent: Component {
         private let nameSection = ComponentView<Empty>()
         private let accessSection = ComponentView<Empty>()
         private let excludedSection = ComponentView<Empty>()
+        private let excludedUsersSection = ComponentView<Empty>()
         private let permissionsSection = ComponentView<Empty>()
         
         private var isUpdating: Bool = false
@@ -79,6 +130,20 @@ final class ChatbotSetupScreenComponent: Component {
         private var environment: EnvironmentType?
         
         private var chevronImage: UIImage?
+        private let textFieldTag = NSObject()
+        
+        private var botResolutionState: BotResolutionState?
+        private var botResolutionDisposable: Disposable?
+        private var resetQueryText: String?
+        
+        private var hasAccessToAllChatsByDefault: Bool = true
+        private var additionalPeerList = AdditionalPeerList(
+            categories: Set(),
+            peers: [],
+            excludePeers: []
+        )
+        
+        private var replyToMessages: Bool = true
         
         override init(frame: CGRect) {
             self.scrollView = ScrollView()
@@ -113,6 +178,40 @@ final class ChatbotSetupScreenComponent: Component {
         }
         
         func attemptNavigation(complete: @escaping () -> Void) -> Bool {
+            guard let component = self.component else {
+                return true
+            }
+            
+            var mappedCategories: TelegramBusinessRecipients.Categories = []
+            if self.additionalPeerList.categories.contains(.existingChats) {
+                mappedCategories.insert(.existingChats)
+            }
+            if self.additionalPeerList.categories.contains(.newChats) {
+                mappedCategories.insert(.newChats)
+            }
+            if self.additionalPeerList.categories.contains(.contacts) {
+                mappedCategories.insert(.contacts)
+            }
+            if self.additionalPeerList.categories.contains(.nonContacts) {
+                mappedCategories.insert(.nonContacts)
+            }
+            let recipients = TelegramBusinessRecipients(
+                categories: mappedCategories,
+                additionalPeers: Set(self.additionalPeerList.peers.map(\.peer.id)),
+                excludePeers: Set(self.additionalPeerList.excludePeers.map(\.peer.id)),
+                exclude: self.hasAccessToAllChatsByDefault
+            )
+            
+            if let botResolutionState = self.botResolutionState, case let .found(peer, isInstalled) = botResolutionState.state, isInstalled {
+                let _ = component.context.engine.accountData.setAccountConnectedBot(bot: TelegramAccountConnectedBot(
+                    id: peer.id,
+                    recipients: recipients,
+                    canReply: self.replyToMessages
+                )).startStandalone()
+            } else {
+                let _ = component.context.engine.accountData.setAccountConnectedBot(bot: nil).startStandalone()
+            }
+            
             return true
         }
         
@@ -150,10 +249,284 @@ final class ChatbotSetupScreenComponent: Component {
             }
         }
         
+        private func updateBotQuery(query: String) {
+            guard let component = self.component else {
+                return
+            }
+            
+            if !query.isEmpty {
+                if self.botResolutionState?.query != query {
+                    let previousState = self.botResolutionState?.state
+                    let updatedState: BotResolutionState.State
+                    if let current = self.botResolutionState?.state, case .found = current {
+                        updatedState = current
+                    } else {
+                        updatedState = .searching
+                    }
+                    self.botResolutionState = BotResolutionState(
+                        query: query,
+                        state: updatedState
+                    )
+                    self.botResolutionDisposable?.dispose()
+                    
+                    if previousState != self.botResolutionState?.state {
+                        self.state?.updated(transition: .spring(duration: 0.35))
+                    }
+                    
+                    var cleanQuery = query
+                    if let url = URL(string: cleanQuery), url.host == "t.me" {
+                        if url.pathComponents.count > 1 {
+                            cleanQuery = url.pathComponents[1]
+                        }
+                    } else if let url = URL(string: "https://\(cleanQuery)"), url.host == "t.me" {
+                        if url.pathComponents.count > 1 {
+                            cleanQuery = url.pathComponents[1]
+                        }
+                    }
+                    
+                    self.botResolutionDisposable = (component.context.engine.peers.resolvePeerByName(name: cleanQuery)
+                    |> delay(0.4, queue: .mainQueue())
+                    |> deliverOnMainQueue).start(next: { [weak self] result in
+                        guard let self else {
+                            return
+                        }
+                        switch result {
+                        case .progress:
+                            break
+                        case let .result(peer):
+                            let previousState = self.botResolutionState?.state
+                            if let peer, case let .user(user) = peer, user.botInfo != nil {
+                                self.botResolutionState?.state = .found(peer: peer, isInstalled: false)
+                            } else {
+                                self.botResolutionState?.state = .notFound
+                            }
+                            if previousState != self.botResolutionState?.state {
+                                self.state?.updated(transition: .spring(duration: 0.35))
+                            }
+                        }
+                    })
+                }
+            } else {
+                if let botResolutionDisposable = self.botResolutionDisposable {
+                    self.botResolutionDisposable = nil
+                    botResolutionDisposable.dispose()
+                }
+                if self.botResolutionState != nil {
+                    self.botResolutionState = nil
+                    self.state?.updated(transition: .spring(duration: 0.35))
+                }
+            }
+        }
+        
+        private func openAdditionalPeerListSetup(isExclude: Bool) {
+            guard let component = self.component, let environment = self.environment else {
+                return
+            }
+            
+            var mappedPeerList = BusinessRecipientListScreenComponent.PeerList(categories: Set(), peers: [])
+            if !isExclude {
+                for category in self.additionalPeerList.categories {
+                    switch category {
+                    case .existingChats:
+                        mappedPeerList.categories.insert(.existingChats)
+                    case .newChats:
+                        mappedPeerList.categories.insert(.newChats)
+                    case .contacts:
+                        mappedPeerList.categories.insert(.contacts)
+                    case .nonContacts:
+                        mappedPeerList.categories.insert(.nonContacts)
+                    }
+                }
+            }
+            if isExclude {
+                for peer in self.additionalPeerList.excludePeers {
+                    mappedPeerList.peers.append(BusinessRecipientListScreenComponent.PeerList.Peer(
+                        peer: peer.peer,
+                        isContact: peer.isContact
+                    ))
+                }
+            } else {
+                for peer in self.additionalPeerList.peers {
+                    mappedPeerList.peers.append(BusinessRecipientListScreenComponent.PeerList.Peer(
+                        peer: peer.peer,
+                        isContact: peer.isContact
+                    ))
+                }
+            }
+            
+            let mode: BusinessRecipientListScreen.Mode
+            if isExclude {
+                mode = .excludeUsers
+            } else {
+                if self.hasAccessToAllChatsByDefault {
+                    mode = .excludeExceptions
+                } else {
+                    mode = .includeExceptions
+                }
+            }
+            
+            if mappedPeerList.categories.isEmpty && mappedPeerList.peers.isEmpty {
+                let controller = BusinessRecipientListScreenComponent.View.makePeerListSetupScreen(
+                    context: component.context,
+                    mode: mode,
+                    initialPeerList: mappedPeerList,
+                    completion: { [weak self] peerList in
+                        guard let self, let component = self.component, let environment = self.environment else {
+                            return
+                        }
+                        
+                        environment.controller()?.push(BusinessRecipientListScreen(
+                            context: component.context,
+                            peerList: peerList,
+                            mode: mode,
+                            update: { [weak self] updatedPeerList in
+                                guard let self else {
+                                    return
+                                }
+                                
+                                switch mode {
+                                case .excludeExceptions, .includeExceptions:
+                                    self.additionalPeerList.peers.removeAll()
+                                    for peer in updatedPeerList.peers {
+                                        self.additionalPeerList.peers.append(AdditionalPeerList.Peer(
+                                            peer: peer.peer,
+                                            isContact: peer.isContact
+                                        ))
+                                        
+                                        self.additionalPeerList.excludePeers.removeAll(where: { $0.peer.id == peer.peer.id })
+                                    }
+                                    self.additionalPeerList.categories.removeAll()
+                                    for category in updatedPeerList.categories {
+                                        switch category {
+                                        case .existingChats:
+                                            self.additionalPeerList.categories.insert(.existingChats)
+                                        case .newChats:
+                                            self.additionalPeerList.categories.insert(.newChats)
+                                        case .contacts:
+                                            self.additionalPeerList.categories.insert(.contacts)
+                                        case .nonContacts:
+                                            self.additionalPeerList.categories.insert(.nonContacts)
+                                        }
+                                    }
+                                case .excludeUsers:
+                                    for peer in updatedPeerList.peers {
+                                        self.additionalPeerList.excludePeers.append(AdditionalPeerList.Peer(
+                                            peer: peer.peer,
+                                            isContact: peer.isContact
+                                        ))
+                                        
+                                        self.additionalPeerList.peers.removeAll(where: { $0.peer.id == peer.peer.id })
+                                    }
+                                }
+                                
+                                self.state?.updated(transition: .immediate)
+                            }
+                        ))
+                    }
+                )
+                environment.controller()?.push(controller)
+            } else {
+                environment.controller()?.push(BusinessRecipientListScreen(
+                    context: component.context,
+                    peerList: mappedPeerList,
+                    mode: mode,
+                    update: { [weak self] updatedPeerList in
+                        guard let self else {
+                            return
+                        }
+                        
+                        switch mode {
+                        case .excludeExceptions, .includeExceptions:
+                            self.additionalPeerList.peers.removeAll()
+                            for peer in updatedPeerList.peers {
+                                self.additionalPeerList.peers.append(AdditionalPeerList.Peer(
+                                    peer: peer.peer,
+                                    isContact: peer.isContact
+                                ))
+                                
+                                self.additionalPeerList.excludePeers.removeAll(where: { $0.peer.id == peer.peer.id })
+                            }
+                            self.additionalPeerList.categories.removeAll()
+                            for category in updatedPeerList.categories {
+                                switch category {
+                                case .existingChats:
+                                    self.additionalPeerList.categories.insert(.existingChats)
+                                case .newChats:
+                                    self.additionalPeerList.categories.insert(.newChats)
+                                case .contacts:
+                                    self.additionalPeerList.categories.insert(.contacts)
+                                case .nonContacts:
+                                    self.additionalPeerList.categories.insert(.nonContacts)
+                                }
+                            }
+                        case .excludeUsers:
+                            for peer in updatedPeerList.peers {
+                                self.additionalPeerList.excludePeers.append(AdditionalPeerList.Peer(
+                                    peer: peer.peer,
+                                    isContact: peer.isContact
+                                ))
+                                
+                                self.additionalPeerList.peers.removeAll(where: { $0.peer.id == peer.peer.id })
+                            }
+                        }
+                        
+                        self.state?.updated(transition: .immediate)
+                    }
+                ))
+            }
+        }
+        
         func update(component: ChatbotSetupScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
             self.isUpdating = true
             defer {
                 self.isUpdating = false
+            }
+            
+            if self.component == nil {
+                if let bot = component.initialData.bot, let botPeer = component.initialData.botPeer, let addressName = botPeer.addressName {
+                    self.botResolutionState = BotResolutionState(query: addressName, state: .found(peer: botPeer, isInstalled: true))
+                    self.resetQueryText = addressName.lowercased()
+                    
+                    self.replyToMessages = bot.canReply
+                    
+                    let initialRecipients = bot.recipients
+                    
+                    var mappedCategories = Set<AdditionalPeerList.Category>()
+                    if initialRecipients.categories.contains(.existingChats) {
+                        mappedCategories.insert(.existingChats)
+                    }
+                    if initialRecipients.categories.contains(.newChats) {
+                        mappedCategories.insert(.newChats)
+                    }
+                    if initialRecipients.categories.contains(.contacts) {
+                        mappedCategories.insert(.contacts)
+                    }
+                    if initialRecipients.categories.contains(.nonContacts) {
+                        mappedCategories.insert(.nonContacts)
+                    }
+                    
+                    var additionalPeers: [AdditionalPeerList.Peer] = []
+                    for peerId in initialRecipients.additionalPeers {
+                        if let peer = component.initialData.additionalPeers[peerId] {
+                            additionalPeers.append(peer)
+                        }
+                    }
+                    
+                    var excludePeers: [AdditionalPeerList.Peer] = []
+                    for peerId in initialRecipients.excludePeers {
+                        if let peer = component.initialData.additionalPeers[peerId] {
+                            excludePeers.append(peer)
+                        }
+                    }
+                    
+                    self.additionalPeerList = AdditionalPeerList(
+                        categories: mappedCategories,
+                        peers: additionalPeers,
+                        excludePeers: excludePeers
+                    )
+                    
+                    self.hasAccessToAllChatsByDefault = initialRecipients.exclude
+                }
             }
             
             let environment = environment[EnvironmentType.self].value
@@ -169,11 +542,10 @@ final class ChatbotSetupScreenComponent: Component {
             
             let presentationData = component.context.sharedContext.currentPresentationData.with { $0 }
             
-            //TODO:localize
             let navigationTitleSize = self.navigationTitle.update(
                 transition: transition,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: "Chatbots", font: Font.semibold(17.0), textColor: environment.theme.rootController.navigationBar.primaryTextColor)),
+                    text: .plain(NSAttributedString(string: environment.strings.ChatbotSetup_TitleItem, font: Font.semibold(17.0), textColor: environment.theme.rootController.navigationBar.primaryTextColor)),
                     horizontalAlignment: .center
                 )),
                 environment: {},
@@ -204,15 +576,16 @@ final class ChatbotSetupScreenComponent: Component {
                 transition: .immediate,
                 component: AnyComponent(LottieComponent(
                     content: LottieComponent.AppBundleContent(name: "BotEmoji"),
-                    loop: true
+                    loop: false
                 )),
                 environment: {},
                 containerSize: CGSize(width: 100.0, height: 100.0)
             )
-            let iconFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - iconSize.width) * 0.5), y: contentHeight + 2.0), size: iconSize)
-            if let iconView = self.icon.view {
+            let iconFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - iconSize.width) * 0.5), y: contentHeight + 8.0), size: iconSize)
+            if let iconView = self.icon.view as? LottieComponent.View {
                 if iconView.superview == nil {
                     self.scrollView.addSubview(iconView)
+                    iconView.playOnce()
                 }
                 transition.setPosition(view: iconView, position: iconFrame.center)
                 iconView.bounds = CGRect(origin: CGPoint(), size: iconFrame.size)
@@ -220,8 +593,7 @@ final class ChatbotSetupScreenComponent: Component {
             
             contentHeight += 129.0
             
-            //TODO:localize
-            let subtitleString = NSMutableAttributedString(attributedString: parseMarkdownIntoAttributedString("Add a bot to your account to help you automatically process and respond to the messages you receive. [Learn More>]()", attributes: MarkdownAttributes(
+            let subtitleString = NSMutableAttributedString(attributedString: parseMarkdownIntoAttributedString(environment.strings.ChatbotSetup_Text, attributes: MarkdownAttributes(
                 body: MarkdownAttributeSet(font: Font.regular(15.0), textColor: environment.theme.list.freeTextColor),
                 bold: MarkdownAttributeSet(font: Font.semibold(15.0), textColor: environment.theme.list.freeTextColor),
                 link: MarkdownAttributeSet(font: Font.regular(15.0), textColor: environment.theme.list.itemAccentColor),
@@ -236,10 +608,9 @@ final class ChatbotSetupScreenComponent: Component {
                 subtitleString.addAttribute(.attachment, value: chevronImage, range: NSRange(range, in: subtitleString.string))
             }
             
-            //TODO:localize
             let subtitleSize = self.subtitle.update(
                 transition: .immediate,
-                component: AnyComponent(MultilineTextComponent(
+                component: AnyComponent(BalancedTextComponent(
                     text: .plain(subtitleString),
                     horizontalAlignment: .center,
                     maximumNumberOfLines: 0,
@@ -253,10 +624,10 @@ final class ChatbotSetupScreenComponent: Component {
                         }
                     },
                     tapAction: { [weak self] _, _ in
-                        guard let self, let component = self.component else {
+                        guard let self, let component = self.component, let environment = self.environment else {
                             return
                         }
-                        let _ = component
+                        component.context.sharedContext.applicationBindings.openUrl(environment.strings.ChatbotSetup_TextLink)
                     }
                 )),
                 environment: {},
@@ -273,7 +644,78 @@ final class ChatbotSetupScreenComponent: Component {
             contentHeight += subtitleSize.height
             contentHeight += 27.0
             
-            //TODO:localize
+            let resetQueryText = self.resetQueryText
+            self.resetQueryText = nil
+            var nameSectionItems: [AnyComponentWithIdentity<Empty>] = []
+            nameSectionItems.append(AnyComponentWithIdentity(id: 0, component: AnyComponent(ListTextFieldItemComponent(
+                theme: environment.theme,
+                initialText: "",
+                resetText: resetQueryText.flatMap { ListTextFieldItemComponent.ResetText(value: $0) },
+                placeholder: environment.strings.ChatbotSetup_BotSearchPlaceholder,
+                autocapitalizationType: .none,
+                autocorrectionType: .no,
+                updated: { [weak self] value in
+                    guard let self else {
+                        return
+                    }
+                    self.updateBotQuery(query: value)
+                },
+                tag: self.textFieldTag
+            ))))
+            if let botResolutionState = self.botResolutionState {
+                let mappedContent: ChatbotSearchResultItemComponent.Content
+                switch botResolutionState.state {
+                case .searching:
+                    mappedContent = .searching
+                case .notFound:
+                    mappedContent = .notFound
+                case let .found(peer, isInstalled):
+                    mappedContent = .found(peer: peer, isInstalled: isInstalled)
+                }
+                nameSectionItems.append(AnyComponentWithIdentity(id: 1, component: AnyComponent(ChatbotSearchResultItemComponent(
+                    context: component.context,
+                    theme: environment.theme,
+                    strings: environment.strings,
+                    content: mappedContent,
+                    installAction: { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        self.endEditing(true)
+                        
+                        if var botResolutionState = self.botResolutionState, case let .found(peer, isInstalled) = botResolutionState.state, !isInstalled {
+                            if case let .user(user) = peer, let botInfo = user.botInfo, botInfo.flags.contains(.isBusiness) {
+                                botResolutionState.state = .found(peer: peer, isInstalled: true)
+                                self.botResolutionState = botResolutionState
+                                self.state?.updated(transition: .spring(duration: 0.3))
+                            } else {
+                                self.environment?.controller()?.present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: nil, text: presentationData.strings.ChatbotSetup_ErrorBotNotBusinessCapable, actions: [
+                                    TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {
+                                    })
+                                ]), in: .window(.root))
+                            }
+                        }
+                    },
+                    removeAction: { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        if let botResolutionState = self.botResolutionState, case let .found(_, isInstalled) = botResolutionState.state, isInstalled {
+                            self.botResolutionState = nil
+                            if let botResolutionDisposable = self.botResolutionDisposable {
+                                self.botResolutionDisposable = nil
+                                botResolutionDisposable.dispose()
+                            }
+                            
+                            if let textFieldView = self.nameSection.findTaggedView(tag: self.textFieldTag) as? ListTextFieldItemComponent.View {
+                                textFieldView.setText(text: "", updateState: false)
+                            }
+                            self.state?.updated(transition: .spring(duration: 0.3))
+                        }
+                    }
+                ))))
+            }
+            
             let nameSectionSize = self.nameSection.update(
                 transition: transition,
                 component: AnyComponent(ListSectionComponent(
@@ -281,21 +723,13 @@ final class ChatbotSetupScreenComponent: Component {
                     header: nil,
                     footer: AnyComponent(MultilineTextComponent(
                         text: .plain(NSAttributedString(
-                            string: "Enter the username or URL of the Telegram bot that you want to automatically process your chats.",
+                            string: environment.strings.ChatbotSetup_BotSectionFooter,
                             font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize),
                             textColor: environment.theme.list.freeTextColor
                         )),
                         maximumNumberOfLines: 0
                     )),
-                    items: [
-                        AnyComponentWithIdentity(id: 0, component: AnyComponent(ListTextFieldItemComponent(
-                            theme: environment.theme,
-                            initialText: "",
-                            placeholder: "Bot Username",
-                            updated: { value in
-                            }
-                        )))
-                    ]
+                    items: nameSectionItems
                 )),
                 environment: {},
                 containerSize: CGSize(width: availableSize.width - sideInset * 2.0, height: 10000.0)
@@ -310,14 +744,13 @@ final class ChatbotSetupScreenComponent: Component {
             contentHeight += nameSectionSize.height
             contentHeight += sectionSpacing
             
-            //TODO:localize
             let accessSectionSize = self.accessSection.update(
                 transition: transition,
                 component: AnyComponent(ListSectionComponent(
                     theme: environment.theme,
                     header: AnyComponent(MultilineTextComponent(
                         text: .plain(NSAttributedString(
-                            string: "CHATS ACCESSIBLE FOR THE BOT",
+                            string: environment.strings.ChatbotSetup_RecipientsSectionHeader,
                             font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize),
                             textColor: environment.theme.list.freeTextColor
                         )),
@@ -330,7 +763,7 @@ final class ChatbotSetupScreenComponent: Component {
                             title: AnyComponent(VStack([
                                 AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
                                     text: .plain(NSAttributedString(
-                                        string: "All 1-to-1 Chats Except...",
+                                        string: environment.strings.BusinessMessageSetup_RecipientsOptionAllExcept,
                                         font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
                                         textColor: environment.theme.list.itemPrimaryTextColor
                                     )),
@@ -339,11 +772,20 @@ final class ChatbotSetupScreenComponent: Component {
                             ], alignment: .left, spacing: 2.0)),
                             leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                                 image: checkIcon,
-                                tintColor: environment.theme.list.itemAccentColor,
+                                tintColor: !self.hasAccessToAllChatsByDefault ? .clear : environment.theme.list.itemAccentColor,
                                 contentMode: .center
                             ))),
                             accessory: nil,
-                            action: { _ in
+                            action: { [weak self] _ in
+                                guard let self else {
+                                    return
+                                }
+                                if !self.hasAccessToAllChatsByDefault {
+                                    self.hasAccessToAllChatsByDefault = true
+                                    self.additionalPeerList.categories.removeAll()
+                                    self.additionalPeerList.peers.removeAll()
+                                    self.state?.updated(transition: .immediate)
+                                }
                             }
                         ))),
                         AnyComponentWithIdentity(id: 1, component: AnyComponent(ListActionItemComponent(
@@ -351,7 +793,7 @@ final class ChatbotSetupScreenComponent: Component {
                             title: AnyComponent(VStack([
                                 AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
                                     text: .plain(NSAttributedString(
-                                        string: "Only Selected Chats",
+                                        string: environment.strings.BusinessMessageSetup_RecipientsOptionOnly,
                                         font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
                                         textColor: environment.theme.list.itemPrimaryTextColor
                                     )),
@@ -360,11 +802,20 @@ final class ChatbotSetupScreenComponent: Component {
                             ], alignment: .left, spacing: 2.0)),
                             leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                                 image: checkIcon,
-                                tintColor: .clear,
+                                tintColor: self.hasAccessToAllChatsByDefault ? .clear : environment.theme.list.itemAccentColor,
                                 contentMode: .center
                             ))),
                             accessory: nil,
-                            action: { _ in
+                            action: { [weak self] _ in
+                                guard let self else {
+                                    return
+                                }
+                                if self.hasAccessToAllChatsByDefault {
+                                    self.hasAccessToAllChatsByDefault = false
+                                    self.additionalPeerList.categories.removeAll()
+                                    self.additionalPeerList.peers.removeAll()
+                                    self.state?.updated(transition: .immediate)
+                                }
                             }
                         )))
                     ]
@@ -382,49 +833,73 @@ final class ChatbotSetupScreenComponent: Component {
             contentHeight += accessSectionSize.height
             contentHeight += sectionSpacing
             
-            //TODO:localize
+            let categoriesAndUsersItemCount = self.additionalPeerList.categories.count + self.additionalPeerList.peers.count
+            let excludedSectionValue: String
+            if categoriesAndUsersItemCount == 0 {
+                excludedSectionValue = environment.strings.ChatbotSetup_RecipientSummary_ValueEmpty
+            } else {
+                excludedSectionValue = environment.strings.ChatbotSetup_RecipientSummary_ValueItems(Int32(categoriesAndUsersItemCount))
+            }
+            
+            let excludedUsersItemCount = self.additionalPeerList.excludePeers.count
+            let excludedUsersValue: String
+            if excludedUsersItemCount == 0 {
+                excludedUsersValue = environment.strings.ChatbotSetup_RecipientSummary_ValueEmpty
+            } else {
+                excludedUsersValue = environment.strings.ChatbotSetup_RecipientSummary_ValueItems(Int32(excludedUsersItemCount))
+            }
+            
+            var excludedSectionItems: [AnyComponentWithIdentity<Empty>] = []
+            excludedSectionItems.append(AnyComponentWithIdentity(id: 0, component: AnyComponent(ListActionItemComponent(
+                theme: environment.theme,
+                title: AnyComponent(VStack([
+                    AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
+                        text: .plain(NSAttributedString(
+                            string: self.hasAccessToAllChatsByDefault ? environment.strings.ChatbotSetup_RecipientSummary_ExcludedChatsItem : environment.strings.ChatbotSetup_RecipientSummary_IncludedChatsItem,
+                            font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
+                            textColor: environment.theme.list.itemPrimaryTextColor
+                        )),
+                        maximumNumberOfLines: 1
+                    ))),
+                ], alignment: .left, spacing: 2.0)),
+                leftIcon: nil,
+                icon: ListActionItemComponent.Icon(component: AnyComponentWithIdentity(id: 0, component: AnyComponent(MultilineTextComponent(
+                    text: .plain(NSAttributedString(
+                        string: excludedSectionValue,
+                        font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
+                        textColor: environment.theme.list.itemSecondaryTextColor
+                    )),
+                    maximumNumberOfLines: 1
+                )))),
+                accessory: .arrow,
+                action: { [weak self] _ in
+                    guard let self else {
+                        return
+                    }
+                    self.openAdditionalPeerListSetup(isExclude: false)
+                }
+            ))))
+            
             let excludedSectionSize = self.excludedSection.update(
                 transition: transition,
                 component: AnyComponent(ListSectionComponent(
                     theme: environment.theme,
-                    header: AnyComponent(MultilineTextComponent(
-                        text: .plain(NSAttributedString(
-                            string: "EXCLUDED CHATS",
-                            font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize),
-                            textColor: environment.theme.list.freeTextColor
-                        )),
-                        maximumNumberOfLines: 0
-                    )),
+                    header: nil,
                     footer: AnyComponent(MultilineTextComponent(
-                        text: .plain(NSAttributedString(
-                            string: "Select chats or entire chat categories which the bot WILL NOT have access to.",
-                            font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize),
-                            textColor: environment.theme.list.freeTextColor
-                        )),
+                        text: .markdown(
+                            text: self.hasAccessToAllChatsByDefault ? environment.strings.ChatbotSetup_Recipients_ExcludedSectionFooter : environment.strings.ChatbotSetup_Recipients_IncludedSectionFooter,
+                            attributes: MarkdownAttributes(
+                                body: MarkdownAttributeSet(font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize), textColor: environment.theme.list.freeTextColor),
+                                bold: MarkdownAttributeSet(font: Font.semibold(presentationData.listsFontSize.itemListBaseHeaderFontSize), textColor: environment.theme.list.freeTextColor),
+                                link: MarkdownAttributeSet(font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize), textColor: environment.theme.list.itemAccentColor),
+                                linkAttribute: { _ in
+                                    return nil
+                                }
+                            )
+                        ),
                         maximumNumberOfLines: 0
                     )),
-                    items: [
-                        AnyComponentWithIdentity(id: 0, component: AnyComponent(ListActionItemComponent(
-                            theme: environment.theme,
-                            title: AnyComponent(VStack([
-                                AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
-                                    text: .plain(NSAttributedString(
-                                        string: "Exclude Chats...",
-                                        font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
-                                        textColor: environment.theme.list.itemAccentColor
-                                    )),
-                                    maximumNumberOfLines: 1
-                                ))),
-                            ], alignment: .left, spacing: 2.0)),
-                            leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
-                                name: "Chat List/AddIcon",
-                                tintColor: environment.theme.list.itemAccentColor
-                            ))),
-                            accessory: nil,
-                            action: { _ in
-                            }
-                        ))),
-                    ]
+                    items: excludedSectionItems
                 )),
                 environment: {},
                 containerSize: CGSize(width: availableSize.width - sideInset * 2.0, height: 10000.0)
@@ -439,14 +914,82 @@ final class ChatbotSetupScreenComponent: Component {
             contentHeight += excludedSectionSize.height
             contentHeight += sectionSpacing
             
-            //TODO:localize
+            var excludedUsersContentHeight: CGFloat = 0.0
+            var excludedUsersSectionItems: [AnyComponentWithIdentity<Empty>] = []
+            excludedUsersSectionItems.append(AnyComponentWithIdentity(id: 0, component: AnyComponent(ListActionItemComponent(
+                theme: environment.theme,
+                title: AnyComponent(VStack([
+                    AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
+                        text: .plain(NSAttributedString(
+                            string: environment.strings.ChatbotSetup_RecipientSummary_ExcludedChatsItem,
+                            font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
+                            textColor: environment.theme.list.itemPrimaryTextColor
+                        )),
+                        maximumNumberOfLines: 1
+                    ))),
+                ], alignment: .left, spacing: 2.0)),
+                leftIcon: nil,
+                icon: ListActionItemComponent.Icon(component: AnyComponentWithIdentity(id: 0, component: AnyComponent(MultilineTextComponent(
+                    text: .plain(NSAttributedString(
+                        string: excludedUsersValue,
+                        font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
+                        textColor: environment.theme.list.itemSecondaryTextColor
+                    )),
+                    maximumNumberOfLines: 1
+                )))),
+                accessory: .arrow,
+                action: { [weak self] _ in
+                    guard let self else {
+                        return
+                    }
+                    self.openAdditionalPeerListSetup(isExclude: true)
+                }
+            ))))
+            let excludedUsersSectionSize = self.excludedUsersSection.update(
+                transition: transition,
+                component: AnyComponent(ListSectionComponent(
+                    theme: environment.theme,
+                    header: nil,
+                    footer: AnyComponent(MultilineTextComponent(
+                        text: .markdown(
+                            text: environment.strings.ChatbotSetup_Recipients_ExcludedSectionFooter,
+                            attributes: MarkdownAttributes(
+                                body: MarkdownAttributeSet(font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize), textColor: environment.theme.list.freeTextColor),
+                                bold: MarkdownAttributeSet(font: Font.semibold(presentationData.listsFontSize.itemListBaseHeaderFontSize), textColor: environment.theme.list.freeTextColor),
+                                link: MarkdownAttributeSet(font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize), textColor: environment.theme.list.itemAccentColor),
+                                linkAttribute: { _ in
+                                    return nil
+                                }
+                            )
+                        ),
+                        maximumNumberOfLines: 0
+                    )),
+                    items: excludedUsersSectionItems
+                )),
+                environment: {},
+                containerSize: CGSize(width: availableSize.width - sideInset * 2.0, height: 10000.0)
+            )
+            let excludedUsersSectionFrame = CGRect(origin: CGPoint(x: sideInset, y: contentHeight + excludedUsersContentHeight), size: excludedSectionSize)
+            if let excludedUsersSectionView = self.excludedUsersSection.view {
+                if excludedUsersSectionView.superview == nil {
+                    self.scrollView.addSubview(excludedUsersSectionView)
+                }
+                transition.setFrame(view: excludedUsersSectionView, frame: excludedUsersSectionFrame)
+                transition.setAlpha(view: excludedUsersSectionView, alpha: !self.hasAccessToAllChatsByDefault ? 1.0 : 0.0)
+            }
+            excludedUsersContentHeight += excludedUsersSectionSize.height
+            excludedUsersContentHeight += sectionSpacing
+            if !self.hasAccessToAllChatsByDefault {
+                contentHeight += excludedUsersContentHeight
+            }
+            
             let permissionsSectionSize = self.permissionsSection.update(
                 transition: transition,
                 component: AnyComponent(ListSectionComponent(
                     theme: environment.theme,
                     header: AnyComponent(MultilineTextComponent(
                         text: .plain(NSAttributedString(
-                            string: "BOT PERMISSIONS",
+                            string: environment.strings.ChatbotSetup_PermissionsSectionHeader,
                             font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize),
                             textColor: environment.theme.list.freeTextColor
                         )),
@@ -454,7 +997,7 @@ final class ChatbotSetupScreenComponent: Component {
                     )),
                     footer: AnyComponent(MultilineTextComponent(
                         text: .plain(NSAttributedString(
-                            string: "The bot will be able to view all new incoming messages, but not the messages that had been sent before you added the bot.",
+                            string: environment.strings.ChatbotSetup_PermissionsSectionFooter,
                             font: Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize),
                             textColor: environment.theme.list.freeTextColor
                         )),
@@ -466,14 +1009,20 @@ final class ChatbotSetupScreenComponent: Component {
                             title: AnyComponent(VStack([
                                 AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
                                     text: .plain(NSAttributedString(
-                                        string: "Reply to Messages",
+                                        string: environment.strings.ChatbotSetup_Permission_ReplyToMessages,
                                         font: Font.regular(presentationData.listsFontSize.baseDisplaySize),
                                         textColor: environment.theme.list.itemPrimaryTextColor
                                     )),
                                     maximumNumberOfLines: 1
                                 ))),
                             ], alignment: .left, spacing: 2.0)),
-                            accessory: .toggle(true),
+                            accessory: .toggle(ListActionItemComponent.Toggle(style: .icons, isOn: self.replyToMessages, action: { [weak self] _ in
+                                guard let self else {
+                                    return
+                                }
+                                self.replyToMessages = !self.replyToMessages
+                                self.state?.updated(transition: .spring(duration: 0.4))
+                            })),
                             action: nil
                         ))),
                     ]
@@ -533,13 +1082,30 @@ final class ChatbotSetupScreenComponent: Component {
 }
 
 public final class ChatbotSetupScreen: ViewControllerComponentContainer {
+    public final class InitialData: ChatbotSetupScreenInitialData {
+        fileprivate let bot: TelegramAccountConnectedBot?
+        fileprivate let botPeer: EnginePeer?
+        fileprivate let additionalPeers: [EnginePeer.Id: ChatbotSetupScreenComponent.AdditionalPeerList.Peer]
+        
+        fileprivate init(
+            bot: TelegramAccountConnectedBot?,
+            botPeer: EnginePeer?,
+            additionalPeers: [EnginePeer.Id: ChatbotSetupScreenComponent.AdditionalPeerList.Peer]
+        ) {
+            self.bot = bot
+            self.botPeer = botPeer
+            self.additionalPeers = additionalPeers
+        }
+    }
+    
     private let context: AccountContext
     
-    public init(context: AccountContext) {
+    public init(context: AccountContext, initialData: InitialData) {
         self.context = context
         
         super.init(context: context, component: ChatbotSetupScreenComponent(
-            context: context
+            context: context,
+            initialData: initialData
         ), navigationBarAppearance: .default, theme: .default, updatedPresentationData: nil)
         
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
@@ -575,5 +1141,50 @@ public final class ChatbotSetupScreen: ViewControllerComponentContainer {
     
     override public func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
+    }
+    
+    public static func initialData(context: AccountContext) -> Signal<ChatbotSetupScreenInitialData, NoError> {
+        return context.engine.data.get(
+            TelegramEngine.EngineData.Item.Peer.BusinessConnectedBot(id: context.account.peerId)
+        )
+        |> mapToSignal { connectedBot -> Signal<ChatbotSetupScreenInitialData, NoError> in
+            guard let connectedBot else {
+                return .single(
+                    InitialData(
+                        bot: nil,
+                        botPeer: nil,
+                        additionalPeers: [:]
+                    )
+                )
+            }
+            
+            var additionalPeerIds = Set<EnginePeer.Id>()
+            additionalPeerIds.formUnion(connectedBot.recipients.additionalPeers)
+            additionalPeerIds.formUnion(connectedBot.recipients.excludePeers)
+            
+            return context.engine.data.get(
+                TelegramEngine.EngineData.Item.Peer.Peer(id: connectedBot.id),
+                EngineDataMap(additionalPeerIds.map(TelegramEngine.EngineData.Item.Peer.Peer.init(id:))),
+                EngineDataMap(additionalPeerIds.map(TelegramEngine.EngineData.Item.Peer.IsContact.init(id:)))
+            )
+            |> map { botPeer, peers, isContacts -> ChatbotSetupScreenInitialData in
+                var additionalPeers: [EnginePeer.Id: ChatbotSetupScreenComponent.AdditionalPeerList.Peer] = [:]
+                for id in additionalPeerIds {
+                    guard let peer = peers[id], let peer else {
+                        continue
+                    }
+                    additionalPeers[id] = ChatbotSetupScreenComponent.AdditionalPeerList.Peer(
+                        peer: peer,
+                        isContact: isContacts[id] ?? false
+                    )
+                }
+                
+                return InitialData(
+                    bot: connectedBot,
+                    botPeer: botPeer,
+                    additionalPeers: additionalPeers
+                )
+            }
+        }
     }
 }

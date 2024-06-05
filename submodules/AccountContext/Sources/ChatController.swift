@@ -744,6 +744,7 @@ public enum ChatControllerSubject: Equatable {
     case scheduledMessages
     case pinnedMessages(id: EngineMessage.Id?)
     case messageOptions(peerIds: [EnginePeer.Id], ids: [EngineMessage.Id], info: MessageOptionsInfo)
+    case customChatContents(contents: ChatCustomContentsProtocol)
     
     public static func ==(lhs: ChatControllerSubject, rhs: ChatControllerSubject) -> Bool {
         switch lhs {
@@ -767,6 +768,12 @@ public enum ChatControllerSubject: Equatable {
             }
         case let .messageOptions(lhsPeerIds, lhsIds, lhsInfo):
             if case let .messageOptions(rhsPeerIds, rhsIds, rhsInfo) = rhs, lhsPeerIds == rhsPeerIds, lhsIds == rhsIds, lhsInfo == rhsInfo {
+                return true
+            } else {
+                return false
+            }
+        case let .customChatContents(lhsValue):
+            if case let .customChatContents(rhsValue) = rhs, lhsValue === rhsValue {
                 return true
             } else {
                 return false
@@ -796,11 +803,30 @@ public enum ChatControllerPresentationMode: Equatable {
     case inline(NavigationController?)
 }
 
+public enum ChatInputTextCommand: Equatable {
+    case command(PeerCommand)
+    case shortcut(ShortcutMessageList.Item)
+}
+
+public struct ChatInputQueryCommandsResult: Equatable {
+    public var commands: [ChatInputTextCommand]
+    public var accountPeer: EnginePeer?
+    public var hasShortcuts: Bool
+    public var query: String
+    
+    public init(commands: [ChatInputTextCommand], accountPeer: EnginePeer?, hasShortcuts: Bool, query: String) {
+        self.commands = commands
+        self.accountPeer = accountPeer
+        self.hasShortcuts = hasShortcuts
+        self.query = query
+    }
+}
+
 public enum ChatPresentationInputQueryResult: Equatable {
     case stickers([FoundStickerItem])
     case hashtags([String])
     case mentions([EnginePeer])
-    case commands([PeerCommand])
+    case commands(ChatInputQueryCommandsResult)
     case emojis([(String, TelegramMediaFile?, String)], NSRange)
     case contextRequestResult(EnginePeer?, ChatContextResultCollection?)
     
@@ -887,6 +913,11 @@ public final class PeerInfoNavigationSourceTag {
 
 public protocol PeerInfoScreen: ViewController {
     var peerId: PeerId { get }
+    var privacySettings: Promise<AccountPrivacySettings?> { get }
+    
+    func openBirthdaySetup()
+    func toggleStorySelection(ids: [Int32], isSelected: Bool)
+    func cancelItemSelection()
 }
 
 public extension Peer {
@@ -966,6 +997,7 @@ public protocol ChatController: ViewController {
     var isSelectingMessagesUpdated: ((Bool) -> Void)? { get set }
     func cancelSelectingMessages()
     func activateSearch(domain: ChatSearchDomain, query: String)
+    func activateInput(type: ChatControllerActivateInput)
     func beginClearHistory(type: InteractiveHistoryClearingType)
     
     func performScrollToTop() -> Bool
@@ -1050,7 +1082,32 @@ public enum ChatHistoryListSource {
     }
     
     case `default`
-    case custom(messages: Signal<([Message], Int32, Bool), NoError>, messageId: MessageId, quote: Quote?, loadMore: (() -> Void)?)
+    case custom(messages: Signal<([Message], Int32, Bool), NoError>, messageId: MessageId?, quote: Quote?, loadMore: (() -> Void)?)
+    case customView(historyView: Signal<(MessageHistoryView, ViewUpdateType), NoError>)
+}
+
+public enum ChatQuickReplyShortcutType {
+    case generic
+    case greeting
+    case away
+}
+
+public enum ChatCustomContentsKind: Equatable {
+    case quickReplyMessageInput(shortcut: String, shortcutType: ChatQuickReplyShortcutType)
+    case businessLinkSetup(link: TelegramBusinessChatLinks.Link)
+}
+
+public protocol ChatCustomContentsProtocol: AnyObject {
+    var kind: ChatCustomContentsKind { get }
+    var historyView: Signal<(MessageHistoryView, ViewUpdateType), NoError> { get }
+    var messageLimit: Int? { get }
+    
+    func enqueueMessages(messages: [EnqueueMessage])
+    func deleteMessages(ids: [EngineMessage.Id])
+    func editMessage(id: EngineMessage.Id, text: String, media: RequestEditMessageMedia, entities: TextEntitiesMessageAttribute?, webpagePreviewAttribute: WebpagePreviewMessageAttribute?, disableUrlPreview: Bool)
+    
+    func quickReplyUpdateShortcut(value: String)
+    func businessLinkUpdate(message: String, entities: [MessageTextEntity], title: String?)
 }
 
 public enum ChatHistoryListDisplayHeaders {
@@ -1069,7 +1126,7 @@ public protocol ChatControllerInteractionProtocol: AnyObject {
 
 public enum ChatHistoryNodeHistoryState: Equatable {
     case loading
-    case loaded(isEmpty: Bool)
+    case loaded(isEmpty: Bool, hasReachedLimits: Bool)
 }
 
 public protocol ChatHistoryListNode: ListView {

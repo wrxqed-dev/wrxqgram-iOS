@@ -458,8 +458,8 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                         
                         if !isBroadcastChannel {
                             hasAvatar = true
-                        } else if case .feed = item.chatLocation {
-                            hasAvatar = true
+                        } else if case .customChatContents = item.chatLocation {
+                            hasAvatar = false
                         }
                     }
                 } else if incoming {
@@ -484,8 +484,8 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                 } else if incoming {
                     hasAvatar = true
                 }
-            case .feed:
-                hasAvatar = true
+            case .customChatContents:
+                hasAvatar = false
             }
             
             if hasAvatar {
@@ -499,7 +499,7 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
             var needsShareButton = false
             if case .pinnedMessages = item.associatedData.subject {
                 needsShareButton = true
-            } else if isFailed || Namespaces.Message.allScheduled.contains(item.message.id.namespace) {
+            } else if isFailed || Namespaces.Message.allNonRegular.contains(item.message.id.namespace) {
                 needsShareButton = false
             } else if item.message.id.peerId == item.context.account.peerId {
                 for attribute in item.content.firstMessage.attributes {
@@ -975,6 +975,9 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                     
                     animation.animator.updateFrame(layer: strongSelf.dateAndStatusNode.layer, frame: dateAndStatusFrame, completion: nil)
                     dateAndStatusApply(animation)
+                    if case .customChatContents = item.associatedData.subject {
+                        strongSelf.dateAndStatusNode.isHidden = true
+                    }
                     
                     if let updatedShareButtonNode = updatedShareButtonNode {
                         if updatedShareButtonNode !== strongSelf.shareButtonNode {
@@ -983,7 +986,9 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                             }
                             strongSelf.shareButtonNode = updatedShareButtonNode
                             strongSelf.addSubnode(updatedShareButtonNode)
-                            updatedShareButtonNode.addTarget(strongSelf, action: #selector(strongSelf.shareButtonPressed), forControlEvents: .touchUpInside)
+                            updatedShareButtonNode.pressed = { [weak strongSelf] in
+                                strongSelf?.shareButtonPressed()
+                            }
                         }
                         let buttonSize = updatedShareButtonNode.update(presentationData: item.presentationData, controllerInteraction: item.controllerInteraction, chatLocation: item.chatLocation, subject: item.associatedData.subject, message: item.message, account: item.context.account)
                         let shareButtonFrame = CGRect(origin: CGPoint(x: baseShareButtonFrame.minX, y: baseShareButtonFrame.maxY - buttonSize.height), size: buttonSize)
@@ -1597,7 +1602,7 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
     
     override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let shareButtonNode = self.shareButtonNode, shareButtonNode.frame.contains(point) {
-            return shareButtonNode.view
+            return shareButtonNode.view.hitTest(self.view.convert(point, to: shareButtonNode.view), with: event)
         }
         if let threadInfoNode = self.threadInfoNode, let result = threadInfoNode.hitTest(self.view.convert(point, to: threadInfoNode.view), with: event) {
             return result

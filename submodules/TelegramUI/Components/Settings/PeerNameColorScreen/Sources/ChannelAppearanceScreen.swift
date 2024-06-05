@@ -38,100 +38,7 @@ import BundleIconComponent
 import Markdown
 import GroupStickerPackSetupController
 import PeerNameColorItem
-
-private final class EmojiActionIconComponent: Component {
-    let context: AccountContext
-    let color: UIColor
-    let fileId: Int64?
-    let file: TelegramMediaFile?
-    
-    init(
-        context: AccountContext,
-        color: UIColor,
-        fileId: Int64?,
-        file: TelegramMediaFile?
-    ) {
-        self.context = context
-        self.color = color
-        self.fileId = fileId
-        self.file = file
-    }
-    
-    static func ==(lhs: EmojiActionIconComponent, rhs: EmojiActionIconComponent) -> Bool {
-        if lhs.context !== rhs.context {
-            return false
-        }
-        if lhs.color != rhs.color {
-            return false
-        }
-        if lhs.fileId != rhs.fileId {
-            return false
-        }
-        if lhs.file != rhs.file {
-            return false
-        }
-        return true
-    }
-    
-    final class View: UIView {
-        private var icon: ComponentView<Empty>?
-        
-        func update(component: EmojiActionIconComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
-            let size = CGSize(width: 24.0, height: 24.0)
-            
-            if let fileId = component.fileId {
-                let icon: ComponentView<Empty>
-                if let current = self.icon {
-                    icon = current
-                } else {
-                    icon = ComponentView()
-                    self.icon = icon
-                }
-                let _ = icon.update(
-                    transition: .immediate,
-                    component: AnyComponent(EmojiStatusComponent(
-                        context: component.context,
-                        animationCache: component.context.animationCache,
-                        animationRenderer: component.context.animationRenderer,
-                        content: .animation(
-                            content: .customEmoji(fileId: fileId),
-                            size: size,
-                            placeholderColor: .lightGray,
-                            themeColor: component.color,
-                            loopMode: .forever
-                        ),
-                        isVisibleForAnimations: false,
-                        action: nil
-                    )),
-                    environment: {},
-                    containerSize: size
-                )
-                let iconFrame = CGRect(origin: CGPoint(), size: size)
-                if let iconView = icon.view {
-                    if iconView.superview == nil {
-                        self.addSubview(iconView)
-                    }
-                    iconView.frame = iconFrame
-                }
-            } else {
-                if let icon = self.icon {
-                    self.icon = nil
-                    icon.view?.removeFromSuperview()
-                }
-            }
-            
-            return size
-        }
-    }
-    
-    func makeView() -> View {
-        return View(frame: CGRect())
-    }
-    
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
-        return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
-    }
-}
+import EmojiActionIconComponent
 
 final class ChannelAppearanceScreenComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
@@ -1261,10 +1168,10 @@ final class ChannelAppearanceScreenComponent: Component {
                             itemGenerator: PeerNameColorItem(
                                 theme: environment.theme,
                                 colors: component.context.peerNameColors,
-                                isProfile: true,
+                                mode: .profile,
                                 currentColor: profileColor,
                                 updated: { [weak self] value in
-                                    guard let self else {
+                                    guard let self, let value else {
                                         return
                                     }
                                     self.updatedPeerProfileColor = value
@@ -1277,14 +1184,14 @@ final class ChannelAppearanceScreenComponent: Component {
                         AnyComponentWithIdentity(id: 2, component: AnyComponent(ListActionItemComponent(
                             theme: environment.theme,
                             title: AnyComponent(HStack(profileLogoContents, spacing: 6.0)),
-                            icon: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
+                            icon: ListActionItemComponent.Icon(component: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
                                 context: component.context,
                                 color: profileColor.flatMap { profileColor in
                                     component.context.peerNameColors.getProfile(profileColor, dark: environment.theme.overallDarkAppearance, subject: .palette).main
                                 } ?? environment.theme.list.itemAccentColor,
                                 fileId: backgroundFileId,
                                 file: backgroundFileId.flatMap { self.cachedIconFiles[$0] }
-                            ))),
+                            )))),
                             action: { [weak self] view in
                                 guard let self, let resolvedState = self.resolveState(), let view = view as? ListActionItemComponent.View, let iconView = view.iconView else {
                                     return
@@ -1406,12 +1313,12 @@ final class ChannelAppearanceScreenComponent: Component {
                             AnyComponentWithIdentity(id: 0, component: AnyComponent(ListActionItemComponent(
                                 theme: environment.theme,
                                 title: AnyComponent(HStack(emojiPackContents, spacing: 6.0)),
-                                icon: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
+                                icon: ListActionItemComponent.Icon(component: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
                                     context: component.context,
                                     color: environment.theme.list.itemAccentColor,
                                     fileId: emojiPack?.thumbnailFileId,
                                     file: emojiPackFile
-                                ))),
+                                )))),
                                 action: { [weak self] view in
                                     guard let self, let resolvedState = self.resolveState() else {
                                         return
@@ -1470,12 +1377,12 @@ final class ChannelAppearanceScreenComponent: Component {
                         AnyComponentWithIdentity(id: 0, component: AnyComponent(ListActionItemComponent(
                             theme: environment.theme,
                             title: AnyComponent(HStack(emojiStatusContents, spacing: 6.0)),
-                            icon: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
+                            icon: ListActionItemComponent.Icon(component: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
                                 context: component.context,
                                 color: environment.theme.list.itemAccentColor,
                                 fileId: statusFileId,
                                 file: statusFileId.flatMap { self.cachedIconFiles[$0] }
-                            ))),
+                            )))),
                             action: { [weak self] view in
                                 guard let self, let resolvedState = self.resolveState(), let view = view as? ListActionItemComponent.View, let iconView = view.iconView else {
                                     return
@@ -1578,10 +1485,10 @@ final class ChannelAppearanceScreenComponent: Component {
                                 itemGenerator: PeerNameColorItem(
                                     theme: environment.theme,
                                     colors: component.context.peerNameColors,
-                                    isProfile: false,
+                                    mode: .name,
                                     currentColor: resolvedState.nameColor,
                                     updated: { [weak self] value in
-                                        guard let self else {
+                                        guard let self, let value else {
                                             return
                                         }
                                         self.updatedPeerNameColor = value
@@ -1594,12 +1501,12 @@ final class ChannelAppearanceScreenComponent: Component {
                             AnyComponentWithIdentity(id: 2, component: AnyComponent(ListActionItemComponent(
                                 theme: environment.theme,
                                 title: AnyComponent(HStack(replyLogoContents, spacing: 6.0)),
-                                icon: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
+                                icon: ListActionItemComponent.Icon(component: AnyComponentWithIdentity(id: 0, component: AnyComponent(EmojiActionIconComponent(
                                     context: component.context,
                                     color: component.context.peerNameColors.get(resolvedState.nameColor, dark: environment.theme.overallDarkAppearance).main,
                                     fileId: replyFileId,
                                     file: replyFileId.flatMap { self.cachedIconFiles[$0] }
-                                ))),
+                                )))),
                                 action: { [weak self] view in
                                     guard let self, let resolvedState = self.resolveState(), let view = view as? ListActionItemComponent.View, let iconView = view.iconView else {
                                         return
@@ -1705,7 +1612,7 @@ final class ChannelAppearanceScreenComponent: Component {
                             sectionId: 0,
                             themes: chatThemes,
                             hasNoTheme: true,
-                            animatedEmojiStickers: component.context.animatedEmojiStickers,
+                            animatedEmojiStickers: component.context.animatedEmojiStickersValue,
                             themeSpecificAccentColors: [:],
                             themeSpecificChatWallpapers: [:],
                             nightMode: environment.theme.overallDarkAppearance,

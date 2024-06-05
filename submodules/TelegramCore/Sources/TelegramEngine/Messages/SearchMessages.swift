@@ -6,7 +6,7 @@ import MtProtoKit
 
 
 public enum SearchMessagesLocation: Equatable {
-    case general(tags: MessageTags?, minDate: Int32?, maxDate: Int32?)
+    case general(scope: TelegramSearchPeersScope, tags: MessageTags?, minDate: Int32?, maxDate: Int32?)
     case group(groupId: PeerGroupId, tags: MessageTags?, minDate: Int32?, maxDate: Int32?)
     case peer(peerId: PeerId, fromId: PeerId?, tags: MessageTags?, reactions: [MessageReaction.Reaction]?, threadId: Int64?, minDate: Int32?, maxDate: Int32?)
     case sentMedia(tags: MessageTags?)
@@ -401,7 +401,7 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
                 }
                 return combineLatest(peerMessages, additionalPeerMessages)
             }
-        case let .general(tags, minDate, maxDate), let .group(_, tags, minDate, maxDate):
+        case let .general(_, tags, minDate, maxDate), let .group(_, tags, minDate, maxDate):
             var flags: Int32 = 0
             let folderId: Int32?
             if case let .group(groupId, _, _, _) = location {
@@ -410,6 +410,16 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
             } else {
                 folderId = nil
             }
+        
+            if case let .general(scope, _, _, _) = location {
+                switch scope {
+                case .everywhere:
+                    break
+                case .channels:
+                    flags |= (1 << 1)
+                }
+            }
+        
             let filter: Api.MessagesFilter = tags.flatMap { messageFilterForTagMask($0) } ?? .inputMessagesFilterEmpty
             remoteSearchResult = account.postbox.transaction { transaction -> (Int32, MessageIndex?, Api.InputPeer) in
                 var lowerBound: MessageIndex?
@@ -454,8 +464,14 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
             
             if state?.additional == nil {
                 switch location {
-                    case let .general(tags, minDate, maxDate), let .group(_, tags, minDate, maxDate):
-                        let secretMessages = transaction.searchMessages(peerId: nil, query: query, tags: tags)
+                    case let .general(_, tags, minDate, maxDate), let .group(_, tags, minDate, maxDate):
+                        let secretMessages: [Message]
+                        if case let .general(scope, _, _, _) = location, case .channels = scope {
+                            secretMessages = []
+                        } else {
+                            secretMessages = transaction.searchMessages(peerId: nil, query: query, tags: tags)
+                        }
+                        
                         var filteredMessages: [Message] = []
                         var readStates: [PeerId: CombinedPeerReadState] = [:]
                         var threadInfo:[MessageId : MessageHistoryThreadData] = [:]
@@ -584,12 +600,18 @@ func _internal_downloadMessage(accountPeerId: PeerId, postbox: Postbox, network:
 }
 
 func fetchRemoteMessage(accountPeerId: PeerId, postbox: Postbox, source: FetchMessageHistoryHoleSource, message: MessageReference) -> Signal<Message?, NoError> {
-    guard case let .message(peer, _, id, _, _, _) = message.content else {
+    guard case let .message(peer, _, id, _, _, _, threadId) = message.content else {
         return .single(nil)
     }
     let signal: Signal<Api.messages.Messages, MTRpcError>
     if id.namespace == Namespaces.Message.ScheduledCloud {
         signal = source.request(Api.functions.messages.getScheduledMessages(peer: peer.inputPeer, id: [id.id]))
+    } else if id.namespace == Namespaces.Message.QuickReplyCloud {
+        if let threadId {
+            signal = source.request(Api.functions.messages.getQuickReplyMessages(flags: 1 << 0, shortcutId: Int32(clamping: threadId), id: [id.id], hash: 0))
+        } else {
+            signal = .never()
+        }
     } else if id.peerId.namespace == Namespaces.Peer.CloudChannel {
         if let channel = peer.inputChannel {
             signal = source.request(Api.functions.channels.getMessages(channel: channel, id: [Api.InputMessage.inputMessageID(id: id.id)]))

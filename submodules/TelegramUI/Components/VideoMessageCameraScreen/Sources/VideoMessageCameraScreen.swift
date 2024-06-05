@@ -260,23 +260,25 @@ private final class VideoMessageCameraScreenComponent: CombinedComponent {
             controller.updateCameraState({ $0.updatedRecording(pressing ? .holding : .handsFree).updatedDuration(initialDuration) }, transition: .spring(duration: 0.4))
         
             controller.node.withReadyCamera(isFirstTime: !controller.node.cameraIsActive) {
-                self.resultDisposable.set((camera.startRecording()
-                |> deliverOnMainQueue).start(next: { [weak self] recordingData in
-                    let duration = initialDuration + recordingData.duration
-                    if let self, let controller = self.getController() {
-                        controller.updateCameraState({ $0.updatedDuration(duration) }, transition: .easeInOut(duration: 0.1))
-                        if isFirstRecording {
-                            controller.node.setupLiveUpload(filePath: recordingData.filePath)
+                Queue.mainQueue().after(0.15) {
+                    self.resultDisposable.set((camera.startRecording()
+                    |> deliverOnMainQueue).start(next: { [weak self] recordingData in
+                        let duration = initialDuration + recordingData.duration
+                        if let self, let controller = self.getController() {
+                            controller.updateCameraState({ $0.updatedDuration(duration) }, transition: .easeInOut(duration: 0.1))
+                            if isFirstRecording {
+                                controller.node.setupLiveUpload(filePath: recordingData.filePath)
+                            }
+                            if duration > 59.5 {
+                                controller.onStop()
+                            }
                         }
-                        if duration > 59.5 {
-                            controller.onStop()
+                    }, error: { [weak self] _ in
+                        if let self, let controller = self.getController() {
+                            controller.completion(nil, nil, nil)
                         }
-                    }
-                }, error: { [weak self] _ in
-                    if let self, let controller = self.getController() {
-                        controller.completion(nil, nil, nil)
-                    }
-                }))
+                    }))
+                }
             }
             
             if initialDuration > 0.0 {
@@ -537,7 +539,7 @@ public class VideoMessageCameraScreen: ViewController {
         case video(Video)
     }
     
-    fileprivate final class Node: ViewControllerTracingNode, UIGestureRecognizerDelegate {
+    fileprivate final class Node: ViewControllerTracingNode, ASGestureRecognizerDelegate {
         private weak var controller: VideoMessageCameraScreen?
         private let context: AccountContext
         fileprivate var camera: Camera?
@@ -1094,6 +1096,7 @@ public class VideoMessageCameraScreen: ViewController {
                     bottom: 44.0,
                     right: layout.safeInsets.right
                 ),
+                additionalInsets: layout.additionalInsets,
                 inputHeight: layout.inputHeight ?? 0.0,
                 metrics: layout.metrics,
                 deviceMetrics: layout.deviceMetrics,
@@ -1562,7 +1565,7 @@ public class VideoMessageCameraScreen: ViewController {
                 guard let self else {
                     return
                 }
-                let values = MediaEditorValues(peerId: self.context.account.peerId, originalDimensions: dimensions, cropOffset: .zero, cropRect: CGRect(origin: .zero, size: dimensions.cgSize), cropScale: 1.0, cropRotation: 0.0, cropMirroring: false, cropOrientation: nil, gradientColors: nil, videoTrimRange: self.node.previewState?.trimRange, videoIsMuted: false, videoIsFullHd: false, videoIsMirrored: false, videoVolume: nil, additionalVideoPath: nil, additionalVideoIsDual: false, additionalVideoPosition: nil, additionalVideoScale: nil, additionalVideoRotation: nil, additionalVideoPositionChanges: [], additionalVideoTrimRange: nil, additionalVideoOffset: nil, additionalVideoVolume: nil, nightTheme: false, drawing: nil, entities: [], toolValues: [:], audioTrack: nil, audioTrackTrimRange: nil, audioTrackOffset: nil, audioTrackVolume: nil, audioTrackSamples: nil, qualityPreset: .videoMessage)
+                let values = MediaEditorValues(peerId: self.context.account.peerId, originalDimensions: dimensions, cropOffset: .zero, cropRect: CGRect(origin: .zero, size: dimensions.cgSize), cropScale: 1.0, cropRotation: 0.0, cropMirroring: false, cropOrientation: nil, gradientColors: nil, videoTrimRange: self.node.previewState?.trimRange, videoIsMuted: false, videoIsFullHd: false, videoIsMirrored: false, videoVolume: nil, additionalVideoPath: nil, additionalVideoIsDual: false, additionalVideoPosition: nil, additionalVideoScale: nil, additionalVideoRotation: nil, additionalVideoPositionChanges: [], additionalVideoTrimRange: nil, additionalVideoOffset: nil, additionalVideoVolume: nil, nightTheme: false, drawing: nil, maskDrawing: nil, entities: [], toolValues: [:], audioTrack: nil, audioTrackTrimRange: nil, audioTrackOffset: nil, audioTrackVolume: nil, audioTrackSamples: nil, qualityPreset: .videoMessage)
                 
                 var resourceAdjustments: VideoMediaResourceAdjustments? = nil
                 if let valuesData = try? JSONEncoder().encode(values) {
@@ -1683,9 +1686,9 @@ public class VideoMessageCameraScreen: ViewController {
     private func requestAudioSession() {
         let audioSessionType: ManagedAudioSessionType
         if self.context.sharedContext.currentMediaInputSettings.with({ $0 }).pauseMusicOnRecording { 
-            audioSessionType = .record(speaker: false, video: true, withOthers: false)
+            audioSessionType = .record(speaker: false, video: false, withOthers: false)
         } else {
-            audioSessionType = .record(speaker: false, video: true, withOthers: true)
+            audioSessionType = .record(speaker: false, video: false, withOthers: true)
         }
       
         self.audioSessionDisposable = self.context.sharedContext.mediaManager.audioSession.push(audioSessionType: audioSessionType, activate: { [weak self] _ in

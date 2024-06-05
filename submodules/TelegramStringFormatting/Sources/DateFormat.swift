@@ -2,7 +2,7 @@ import Foundation
 import TelegramPresentationData
 import TelegramUIPreferences
 
-public func stringForShortTimestamp(hours: Int32, minutes: Int32, dateTimeFormat: PresentationDateTimeFormat) -> String {
+public func stringForShortTimestamp(hours: Int32, minutes: Int32, dateTimeFormat: PresentationDateTimeFormat, formatAsPlainText: Bool = false) -> String {
     switch dateTimeFormat.timeFormat {
     case .regular:
         let hourString: String
@@ -20,10 +20,18 @@ public func stringForShortTimestamp(hours: Int32, minutes: Int32, dateTimeFormat
         } else {
             periodString = "AM"
         }
-        if minutes >= 10 {
-            return "\(hourString):\(minutes) \(periodString)"
+        
+        let spaceCharacter: String
+        if formatAsPlainText {
+            spaceCharacter = " "
         } else {
-            return "\(hourString):0\(minutes) \(periodString)"
+            spaceCharacter = "\u{00a0}"
+        }
+        
+        if minutes >= 10 {
+            return "\(hourString):\(minutes)\(spaceCharacter)\(periodString)"
+        } else {
+            return "\(hourString):0\(minutes)\(spaceCharacter)\(periodString)"
         }
     case .military:
         return String(format: "%02d:%02d", arguments: [Int(hours), Int(minutes)])
@@ -48,6 +56,30 @@ public func getDateTimeComponents(timestamp: Int32) -> (day: Int32, month: Int32
     localtime_r(&t, &timeinfo);
     
     return (timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year, timeinfo.tm_hour, timeinfo.tm_min)
+}
+
+public func stringForMediumCompactDate(timestamp: Int32, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, withTime: Bool = true) -> String {
+    var t: time_t = Int(timestamp)
+    var timeinfo = tm()
+    localtime_r(&t, &timeinfo);
+    
+    let day = timeinfo.tm_mday
+    let month = monthAtIndex(Int(timeinfo.tm_mon), strings: strings)
+    
+    let timeString: String
+    if withTime {
+        timeString = " \(stringForShortTimestamp(hours: Int32(timeinfo.tm_hour), minutes: Int32(timeinfo.tm_min), dateTimeFormat: dateTimeFormat))"
+    } else {
+        timeString = ""
+    }
+    let dateString: String
+    switch dateTimeFormat.dateFormat {
+        case .monthFirst:
+            dateString = String(format: "%@ %02d%@", month, day, timeString)
+        case .dayFirst:
+            dateString = String(format: "%02d %@%@", day, month, timeString)
+    }
+    return dateString
 }
 
 public func stringForMediumDate(timestamp: Int32, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, withTime: Bool = true) -> String {

@@ -44,7 +44,7 @@ public enum ChatListContainerNodeFilter: Equatable {
     }
 }
 
-public final class ChatListContainerNode: ASDisplayNode, UIGestureRecognizerDelegate {
+public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     private let context: AccountContext
     private weak var controller: ChatListControllerImpl?
     let location: ChatListControllerLocation
@@ -342,6 +342,12 @@ public final class ChatListContainerNode: ASDisplayNode, UIGestureRecognizerDele
             }
             return canExpandHiddenItems()
         }
+        itemNode.listNode.openBirthdaySetup = { [weak self] in
+            self?.openBirthdaySetup?()
+        }
+        itemNode.listNode.openPremiumManagement = { [weak self] in
+            self?.openPremiumManagement?()
+        }
         
         self.currentItemStateValue.set(itemNode.listNode.state |> map { state in
             let filterId: Int32?
@@ -404,6 +410,8 @@ public final class ChatListContainerNode: ASDisplayNode, UIGestureRecognizerDele
     var endedInteractiveDragging: ((ListView) -> Void)?
     var shouldStopScrolling: ((ListView, CGFloat) -> Bool)?
     var activateChatPreview: ((ChatListItem, Int64?, ASDisplayNode, ContextGesture?, CGPoint?) -> Void)?
+    var openBirthdaySetup: (() -> Void)?
+    var openPremiumManagement: (() -> Void)?
     var openStories: ((ChatListNode.OpenStoriesSubject, ASDisplayNode?) -> Void)?
     var addedVisibleChatsWithPeerIds: (([EnginePeer.Id]) -> Void)?
     var didBeginSelectingChats: (() -> Void)?
@@ -477,7 +485,7 @@ public final class ChatListContainerNode: ASDisplayNode, UIGestureRecognizerDele
                 return [.rightEdge]
             }
         }, edgeWidth: .widthMultiplier(factor: 1.0 / 6.0, min: 22.0, max: 80.0))
-        panRecognizer.delegate = self
+        panRecognizer.delegate = self.wrappedGestureRecognizerDelegate
         panRecognizer.delaysTouchesBegan = false
         panRecognizer.cancelsTouchesInView = true
         self.panRecognizer = panRecognizer
@@ -1005,7 +1013,7 @@ public final class ChatListContainerNode: ASDisplayNode, UIGestureRecognizerDele
     }
 }
 
-final class ChatListControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
+final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     private let context: AccountContext
     private let location: ChatListControllerLocation
     private var presentationData: PresentationData
@@ -1195,7 +1203,7 @@ final class ChatListControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
             let directions: InteractiveTransitionGestureRecognizerDirections = [.rightCenter]
             return directions
         }, edgeWidth: .widthMultiplier(factor: 1.0 / 6.0, min: 22.0, max: 80.0))
-        inlineContentPanRecognizer.delegate = self
+        inlineContentPanRecognizer.delegate = self.wrappedGestureRecognizerDelegate
         inlineContentPanRecognizer.delaysTouchesBegan = false
         inlineContentPanRecognizer.cancelsTouchesInView = true
         self.inlineContentPanRecognizer = inlineContentPanRecognizer
@@ -1327,6 +1335,7 @@ final class ChatListControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
                 statusBarHeight: layout.statusBarHeight ?? 0.0,
                 sideInset: layout.safeInsets.left,
                 isSearchActive: self.isSearchDisplayControllerActive,
+                isSearchEnabled: true,
                 primaryContent: headerContent?.primaryContent,
                 secondaryContent: headerContent?.secondaryContent,
                 secondaryTransition: self.inlineStackContainerTransitionFraction,

@@ -148,7 +148,7 @@ private func chatListSearchContainerPreparedTransition(from fromEntries: [ChatLi
     return ChatListSearchContainerTransition(deletions: deletions, insertions: insertions, updates: updates)
 }
 
-class ChatSearchResultsControllerNode: ViewControllerTracingNode, UIScrollViewDelegate {
+class ChatSearchResultsControllerNode: ViewControllerTracingNode, ASScrollViewDelegate {
     private let context: AccountContext
     private var presentationData: PresentationData
     private let animationCache: AnimationCache
@@ -282,13 +282,16 @@ class ChatSearchResultsControllerNode: ViewControllerTracingNode, UIScrollViewDe
         }, openStorageManagement: {
         }, openPasswordSetup: {
         }, openPremiumIntro: {
-        }, openPremiumGift: {
+        }, openPremiumGift: { _ in
+        }, openPremiumManagement: {
         }, openActiveSessions: {
+        }, openBirthdaySetup: {
         }, performActiveSessionAction: { _, _ in
         }, openChatFolderUpdates: {
         }, hideChatFolderUpdates: {
         }, openStories: { _, _ in
         }, dismissNotice: { _ in
+        }, editPeer: { _ in
         })
         interaction.searchTextHighightState = searchQuery
         self.interaction = interaction

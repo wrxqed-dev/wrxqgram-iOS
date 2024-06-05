@@ -20,6 +20,7 @@ import ConfettiEffect
 import TextFormat
 import UniversalMediaPlayer
 import InstantPageCache
+import ScrollComponent
 
 extension PremiumGiftSource {
     var identifier: String? {
@@ -274,7 +275,7 @@ private final class PremiumGiftScreenContentComponent: CombinedComponent {
             if let current = context.state.cachedBoostIcon {
                 boostIcon = current
             } else {
-                boostIcon = generateImage(CGSize(width: 14.0, height: 20.0), rotatedContext: { size, context in
+                boostIcon = generateImage(CGSize(width: 14.0, height: 20.0), contextGenerator: { size, context in
                     context.clear(CGRect(origin: .zero, size: size))
                     if let cgImage = UIImage(bundleImageName: "Premium/BoostChannel")?.cgImage {
                         context.draw(cgImage, in: CGRect(origin: .zero, size: size), byTiling: false)
@@ -424,6 +425,7 @@ private final class PremiumGiftScreenContentComponent: CombinedComponent {
                 UIColor(rgb: 0xef6922),
                 UIColor(rgb: 0xe95a2c),
                 UIColor(rgb: 0xe74e33),
+                UIColor(rgb: 0xe74e33), //replace
                 UIColor(rgb: 0xe54937),
                 UIColor(rgb: 0xe3433c),
                 UIColor(rgb: 0xdb374b),
@@ -434,6 +436,7 @@ private final class PremiumGiftScreenContentComponent: CombinedComponent {
                 UIColor(rgb: 0x9b4fed),
                 UIColor(rgb: 0x8958ff),
                 UIColor(rgb: 0x676bff),
+                UIColor(rgb: 0x676bff), //replace
                 UIColor(rgb: 0x6172ff),
                 UIColor(rgb: 0x5b79ff),
                 UIColor(rgb: 0x4492ff),
@@ -530,6 +533,10 @@ private final class PremiumGiftScreenContentComponent: CombinedComponent {
                             demoSubject = .lastSeen
                         case .messagePrivacy:
                             demoSubject = .messagePrivacy
+                        case .business:
+                            demoSubject = .business
+                        default:
+                            demoSubject = .doubleLimits
                         }
                         
                         let buttonText: String
@@ -598,7 +605,7 @@ private final class PremiumGiftScreenContentComponent: CombinedComponent {
                     if url.hasPrefix("https://apps.apple.com/account/subscriptions") {
                         controller.context.sharedContext.applicationBindings.openSubscriptions()
                     } else if url.hasPrefix("https://") || url.hasPrefix("tg://") {
-                        controller.context.sharedContext.openExternalUrl(context: controller.context, urlContext: .generic, url: url, forceExternal: !url.hasPrefix("tg://"), presentationData: controller.context.sharedContext.currentPresentationData.with({$0}), navigationController: nil, dismissInput: {})
+                        controller.context.sharedContext.openExternalUrl(context: controller.context, urlContext: .generic, url: url, forceExternal: !url.hasPrefix("tg://") && !url.contains("?start="), presentationData: controller.context.sharedContext.currentPresentationData.with({$0}), navigationController: nil, dismissInput: {})
                     } else {
                         let context = controller.context
                         let signal: Signal<ResolvedUrl, NoError>?

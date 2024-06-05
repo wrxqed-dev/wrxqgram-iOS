@@ -11,8 +11,9 @@ import TelegramCore
 import TelegramPresentationData
 import FastBlur
 import AccountContext
+import ImageTransparency
 
-public struct MediaEditorPlayerState {
+public struct MediaEditorPlayerState: Equatable {
     public struct Track: Equatable {
         public enum Content: Equatable {
             case video(frames: [UIImage], framesUpdateTimestamp: Double)
@@ -94,12 +95,18 @@ public final class MediaEditor {
         }
     }
     
+    public enum Mode {
+        case `default`
+        case sticker
+    }
+    
     public enum Subject {
         case image(UIImage, PixelDimensions)
         case video(String, UIImage?, Bool, String?, PixelDimensions, Double)
         case asset(PHAsset)
         case draft(MediaEditorDraft)
         case message(MessageId)
+        case sticker(TelegramMediaFile)
         
         var dimensions: PixelDimensions {
             switch self {
@@ -111,20 +118,21 @@ public final class MediaEditor {
                 return draft.dimensions
             case .message:
                 return PixelDimensions(width: 1080, height: 1920)
+            case .sticker:
+                return PixelDimensions(width: 1080, height: 1920)
             }
         }
     }
 
     private let context: AccountContext
+    private let mode: Mode
     private let subject: Subject
     
     private let clock = CMClockGetHostTimeClock()
         
-    private var player: AVPlayer? {
-        didSet {
-            
-        }
-    }
+    private var stickerEntity: MediaEditorComposerStickerEntity?
+    
+    private var player: AVPlayer?
     private var playerAudioMix: AVMutableAudioMix?
     
     private var additionalPlayer: AVPlayer?
@@ -182,6 +190,12 @@ public final class MediaEditor {
         }
     }
     
+    public private(set) var canCutout: Bool = false
+    public var canCutoutUpdated: (Bool, Bool) -> Void = { _, _ in }
+    public var maskUpdated: (UIImage, Bool) -> Void = { _, _ in }
+    
+    public var classificationUpdated: ([(String, Float)]) -> Void = { _ in }
+    
     private var textureCache: CVMetalTextureCache!
     
     public var hasPortraitMask: Bool {
@@ -193,6 +207,9 @@ public final class MediaEditor {
     }
     
     public var resultIsVideo: Bool {
+        if case let .sticker(file) = self.subject {
+            return file.isAnimatedSticker || file.isVideoSticker
+        }
         return self.player != nil || self.audioPlayer != nil || self.additionalPlayer != nil || self.values.entities.contains(where: { $0.entity.isAnimated })
     }
     
@@ -246,7 +263,9 @@ public final class MediaEditor {
     }
    
     public var duration: Double? {
-        if let _ = self.player {
+        if let stickerEntity = self.stickerEntity {
+            return stickerEntity.totalDuration
+        } else if let _ = self.player {
             if let trimRange = self.values.videoTrimRange {
                 return trimRange.upperBound - trimRange.lowerBound
             } else {
@@ -391,8 +410,9 @@ public final class MediaEditor {
         }
     }
     
-    public init(context: AccountContext, subject: Subject, values: MediaEditorValues? = nil, hasHistogram: Bool = false) {
+    public init(context: AccountContext, mode: Mode, subject: Subject, values: MediaEditorValues? = nil, hasHistogram: Bool = false) {
         self.context = context
+        self.mode = mode
         self.subject = subject
         if let values {
             self.values = values
@@ -424,6 +444,7 @@ public final class MediaEditor {
                 additionalVideoVolume: nil,
                 nightTheme: false,
                 drawing: nil,
+                maskDrawing: nil,
                 entities: [],
                 toolValues: [:],
                 audioTrack: nil,
@@ -469,7 +490,8 @@ public final class MediaEditor {
         if mirror {
             self.renderer.videoFinishPass.additionalTextureRotation = .rotate0DegreesMirrored
         }
-        self.renderer.consume(main: .texture(texture, time), additional: additionalTexture.flatMap { .texture($0, time) }, render: true, displayEnabled: false)
+        let hasTransparency = imageHasTransparency(image)
+        self.renderer.consume(main: .texture(texture, time, hasTransparency), additional: additionalTexture.flatMap { .texture($0, time, false) }, render: true, displayEnabled: false)
     }
     
     private func setupSource() {
@@ -487,13 +509,22 @@ public final class MediaEditor {
             let image: UIImage?
             let nightImage: UIImage?
             let player: AVPlayer?
+            let stickerEntity: MediaEditorComposerStickerEntity?
             let playerIsReference: Bool
             let gradientColors: GradientColors
             
-            init(image: UIImage? = nil, nightImage: UIImage? = nil, player: AVPlayer? = nil, playerIsReference: Bool = false, gradientColors: GradientColors) {
+            init(
+                image: UIImage? = nil,
+                nightImage: UIImage? = nil,
+                player: AVPlayer? = nil,
+                stickerEntity: MediaEditorComposerStickerEntity? = nil,
+                playerIsReference: Bool = false,
+                gradientColors: GradientColors
+            ) {
                 self.image = image
                 self.nightImage = nightImage
                 self.player = player
+                self.stickerEntity = stickerEntity
                 self.playerIsReference = playerIsReference
                 self.gradientColors = gradientColors
             }
@@ -642,6 +673,26 @@ public final class MediaEditor {
                     )
                 }
             }
+        case let .sticker(file):
+            let entity = MediaEditorComposerStickerEntity(
+                postbox: self.context.account.postbox,
+                content: .file(file),
+                position: .zero,
+                scale: 1.0,
+                rotation: 0.0,
+                baseSize: CGSize(width: 512.0, height: 512.0),
+                mirrored: false,
+                colorSpace: CGColorSpaceCreateDeviceRGB(),
+                tintColor: nil,
+                isStatic: false,
+                highRes: true
+            )
+            textureSource = .single(
+                TextureSourceResult(
+                    stickerEntity: entity,
+                    gradientColors: GradientColors(top: .clear, bottom: .clear)
+                )
+            )
         }
         
         self.textureSourceDisposable = (textureSource
@@ -661,12 +712,38 @@ public final class MediaEditor {
             
                 self.player = textureSourceResult.player
                 self.playerPromise.set(.single(player))
-            
+                            
                 if let image = textureSourceResult.image {
                     if self.values.nightTheme, let nightImage = textureSourceResult.nightImage {
                         textureSource.setMainInput(.image(nightImage))
                     } else {
                         textureSource.setMainInput(.image(image))
+                    }
+                    
+                    if case .sticker = self.mode {
+                        if !imageHasTransparency(image) {
+                            let _ = (cutoutStickerImage(from: image, onlyCheck: true)
+                            |> deliverOnMainQueue).start(next: { [weak self] result in
+                                guard let self else {
+                                    return
+                                }
+                                let canCutout = result != nil
+                                self.canCutout = canCutout
+                                self.canCutoutUpdated(canCutout, false)
+                            })
+                            self.maskUpdated(image, false)
+                        } else {
+                            self.canCutout = false
+                            self.canCutoutUpdated(false, true)
+                            
+                            if let maskImage = generateTintedImage(image: image, color: .white, backgroundColor: .black) {
+                                self.maskUpdated(maskImage, true)
+                            }
+                        }
+                        let _ = (classifyImage(image)
+                        |> deliverOnMainQueue).start(next: { [weak self] classes in
+                            self?.classificationUpdated(classes)
+                        })
                     }
                 }
                 if let player, let playerItem = player.currentItem, !textureSourceResult.playerIsReference {
@@ -675,9 +752,19 @@ public final class MediaEditor {
                 if let additionalPlayer, let playerItem = additionalPlayer.currentItem {
                     textureSource.setAdditionalInput(.video(playerItem))
                 }
+                if let entity = textureSourceResult.stickerEntity {
+                    textureSource.setMainInput(.entity(entity))
+                }
+                self.stickerEntity = textureSourceResult.stickerEntity
+                
                 self.renderer.textureSource = textureSource
                 
-                self.setGradientColors(textureSourceResult.gradientColors)
+                switch self.mode {
+                case .default:
+                    self.setGradientColors(textureSourceResult.gradientColors)
+                case .sticker:
+                    self.setGradientColors(GradientColors(top: .clear, bottom: .clear))
+                }
                 
                 if let _ = textureSourceResult.player {
                     self.updateRenderChain()
@@ -737,6 +824,10 @@ public final class MediaEditor {
                 }
             }
         })
+    }
+    
+    public func setOnNextDisplay(_ f: @escaping () -> Void) {
+        self.renderer.onNextRender = f
     }
     
     public func setOnNextAdditionalDisplay(_ f: @escaping () -> Void) {
@@ -864,7 +955,7 @@ public final class MediaEditor {
         self.updateRenderChain()
     }
     
-    public func setToolValue(_ key: EditorToolKey, value: Any) {
+    public func setToolValue(_ key: EditorToolKey, value: Any?) {
         self.updateValues { values in
             var updatedToolValues = values.toolValues
             updatedToolValues[key] = value
@@ -1615,7 +1706,7 @@ public final class MediaEditor {
     
     public func setGradientColors(_ gradientColors: GradientColors) {
         self.gradientColorsPromise.set(.single(gradientColors))
-        self.updateValues(mode: .skipRendering) { values in
+        self.updateValues(mode: self.sourceIsVideo ? .skipRendering : .generic) { values in
             return values.withUpdatedGradientColors(gradientColors: gradientColors.array)
         }
     }
@@ -1652,6 +1743,50 @@ public final class MediaEditor {
     public func requestRenderFrame() {
         self.renderer.willRenderFrame()
         self.renderer.renderFrame()
+    }
+    
+    private var mainInputMask: MTLTexture?
+    public func removeSegmentationMask() {        
+        self.mainInputMask = nil
+        self.renderer.currentMainInputMask = nil
+        if !self.skipRendering {
+            self.updateRenderChain()
+        }
+    }
+    
+    public func setSegmentationMask(_ image: UIImage, andEnable enable: Bool = false) {
+        guard let renderTarget = self.previewView, let device = renderTarget.mtlDevice else {
+            return
+        }
+        
+        //TODO:replace with pixelbuffer?
+        self.mainInputMask = loadTexture(image: image, device: device)
+        if enable {
+            self.isSegmentationMaskEnabled = true
+        }
+        self.renderer.currentMainInputMask = self.isSegmentationMaskEnabled ? self.mainInputMask : nil
+        if !self.skipRendering {
+            self.updateRenderChain()
+        }
+    }
+    
+    public var isSegmentationMaskEnabled: Bool = true {
+        didSet {
+            self.renderer.currentMainInputMask = self.isSegmentationMaskEnabled ? self.mainInputMask : nil
+            if !self.skipRendering {
+                self.updateRenderChain()
+            }
+        }
+    }
+    
+    
+    public func processImage(with f: @escaping (UIImage, UIImage?) -> Void) {
+        guard let textureSource = self.renderer.textureSource as? UniversalTextureSource, let image = textureSource.mainImage else {
+            return
+        }
+        Queue.concurrentDefaultQueue().async {
+            f(image, self.resultImage)
+        }
     }
     
     private func maybeGeneratePersonSegmentation(_ image: UIImage?) {

@@ -29,6 +29,9 @@ import ChatEntityKeyboardInputNode
 import PremiumUI
 import PremiumGiftAttachmentScreen
 import TelegramCallsUI
+import AutomaticBusinessMessageSetupScreen
+import MediaEditorScreen
+import CameraScreen
 
 extension ChatControllerImpl {
     enum AttachMenuSubject {
@@ -39,10 +42,6 @@ extension ChatControllerImpl {
     }
     
     func presentAttachmentMenu(subject: AttachMenuSubject) {
-        guard let peer = self.presentationInterfaceState.renderedPeer?.peer else {
-            return
-        }
-                
         let context = self.context
         let inputIsActive = self.presentationInterfaceState.inputMode == .text
         
@@ -56,42 +55,46 @@ extension ChatControllerImpl {
         var bannedSendFiles: (Int32, Bool)?
         
         var canSendPolls = true
-        if let peer = peer as? TelegramUser, peer.botInfo == nil {
-            canSendPolls = false
-        } else if peer is TelegramSecretChat {
-            canSendPolls = false
-        } else if let channel = peer as? TelegramChannel {
-            if let value = channel.hasBannedPermission(.banSendPhotos, ignoreDefault: canByPassRestrictions) {
-                bannedSendPhotos = value
-            }
-            if let value = channel.hasBannedPermission(.banSendVideos, ignoreDefault: canByPassRestrictions) {
-                bannedSendVideos = value
-            }
-            if let value = channel.hasBannedPermission(.banSendFiles, ignoreDefault: canByPassRestrictions) {
-                bannedSendFiles = value
-            }
-            if let value = channel.hasBannedPermission(.banSendText, ignoreDefault: canByPassRestrictions) {
-                banSendText = value
-            }
-            if channel.hasBannedPermission(.banSendPolls, ignoreDefault: canByPassRestrictions) != nil {
+        if let peer = self.presentationInterfaceState.renderedPeer?.peer {
+            if let peer = peer as? TelegramUser, peer.botInfo == nil {
                 canSendPolls = false
-            }
-        } else if let group = peer as? TelegramGroup {
-            if group.hasBannedPermission(.banSendPhotos) {
-                bannedSendPhotos = (Int32.max, false)
-            }
-            if group.hasBannedPermission(.banSendVideos) {
-                bannedSendVideos = (Int32.max, false)
-            }
-            if group.hasBannedPermission(.banSendFiles) {
-                bannedSendFiles = (Int32.max, false)
-            }
-            if group.hasBannedPermission(.banSendText) {
-                banSendText = (Int32.max, false)
-            }
-            if group.hasBannedPermission(.banSendPolls) {
+            } else if peer is TelegramSecretChat {
                 canSendPolls = false
+            } else if let channel = peer as? TelegramChannel {
+                if let value = channel.hasBannedPermission(.banSendPhotos, ignoreDefault: canByPassRestrictions) {
+                    bannedSendPhotos = value
+                }
+                if let value = channel.hasBannedPermission(.banSendVideos, ignoreDefault: canByPassRestrictions) {
+                    bannedSendVideos = value
+                }
+                if let value = channel.hasBannedPermission(.banSendFiles, ignoreDefault: canByPassRestrictions) {
+                    bannedSendFiles = value
+                }
+                if let value = channel.hasBannedPermission(.banSendText, ignoreDefault: canByPassRestrictions) {
+                    banSendText = value
+                }
+                if channel.hasBannedPermission(.banSendPolls, ignoreDefault: canByPassRestrictions) != nil {
+                    canSendPolls = false
+                }
+            } else if let group = peer as? TelegramGroup {
+                if group.hasBannedPermission(.banSendPhotos) {
+                    bannedSendPhotos = (Int32.max, false)
+                }
+                if group.hasBannedPermission(.banSendVideos) {
+                    bannedSendVideos = (Int32.max, false)
+                }
+                if group.hasBannedPermission(.banSendFiles) {
+                    bannedSendFiles = (Int32.max, false)
+                }
+                if group.hasBannedPermission(.banSendText) {
+                    banSendText = (Int32.max, false)
+                }
+                if group.hasBannedPermission(.banSendPolls) {
+                    canSendPolls = false
+                }
             }
+        } else {
+            canSendPolls = false
         }
         
         var availableButtons: [AttachmentButtonType] = [.gallery, .file]
@@ -111,26 +114,31 @@ extension ChatControllerImpl {
         }
         
         var peerType: AttachMenuBots.Bot.PeerFlags = []
-        if let user = peer as? TelegramUser {
-            if let _ = user.botInfo {
-                peerType.insert(.bot)
-            } else {
-                peerType.insert(.user)
-            }
-        } else if let _ = peer as? TelegramGroup {
-            peerType = .group
-        } else if let channel = peer as? TelegramChannel {
-            if case .broadcast = channel.info {
-                peerType = .channel
-            } else {
+        if let peer = self.presentationInterfaceState.renderedPeer?.peer {
+            if let user = peer as? TelegramUser {
+                if let _ = user.botInfo {
+                    peerType.insert(.bot)
+                } else {
+                    peerType.insert(.user)
+                }
+            } else if let _ = peer as? TelegramGroup {
                 peerType = .group
+            } else if let channel = peer as? TelegramChannel {
+                if case .broadcast = channel.info {
+                    peerType = .channel
+                } else {
+                    peerType = .group
+                }
             }
         }
         
         let buttons: Signal<([AttachmentButtonType], [AttachmentButtonType], AttachmentButtonType?), NoError>
-        if !isScheduledMessages && !peer.isDeleted {
-            buttons = self.context.engine.messages.attachMenuBots()
-            |> map { attachMenuBots in
+        if let peer = self.presentationInterfaceState.renderedPeer?.peer, !isScheduledMessages, !peer.isDeleted {
+            buttons = combineLatest(
+                self.context.engine.messages.attachMenuBots(),
+                self.context.engine.accountData.shortcutMessageList(onlyRemote: true) |> take(1)
+            )
+            |> map { attachMenuBots, shortcutMessageList in
                 var buttons = availableButtons
                 var allButtons = availableButtons
                 var initialButton: AttachmentButtonType?
@@ -164,6 +172,19 @@ extension ChatControllerImpl {
                     allButtons.insert(button, at: 1)
                 }
                 
+                if let user = peer as? TelegramUser, user.botInfo == nil {
+                    if let index = buttons.firstIndex(where: { $0 == .location }) {
+                        buttons.insert(.quickReply, at: index + 1)
+                    } else {
+                        buttons.append(.quickReply)
+                    }
+                    if let index = allButtons.firstIndex(where: { $0 == .location }) {
+                        allButtons.insert(.quickReply, at: index + 1)
+                    } else {
+                        allButtons.append(.quickReply)
+                    }
+                }
+                
                 return (buttons, allButtons, initialButton)
             }
         } else {
@@ -177,7 +198,15 @@ extension ChatControllerImpl {
         
         let premiumConfiguration = PremiumConfiguration.with(appConfiguration: self.context.currentAppConfiguration.with { $0 })
         let premiumGiftOptions: [CachedPremiumGiftOption]
-        if !premiumConfiguration.isPremiumDisabled && premiumConfiguration.showPremiumGiftInAttachMenu, let user = peer as? TelegramUser, !user.isPremium && !user.isDeleted && user.botInfo == nil && !user.flags.contains(.isSupport) {
+        
+        var showPremiumGift = false
+        if !premiumConfiguration.isPremiumDisabled {
+            if premiumConfiguration.showPremiumGiftInAttachMenu || self.presentationInterfaceState.hasBirthdayToday {
+                showPremiumGift = true
+            }
+        }
+        
+        if let peer = self.presentationInterfaceState.renderedPeer?.peer, showPremiumGift, let user = peer as? TelegramUser, !user.isPremium && !user.isDeleted && user.botInfo == nil && !user.flags.contains(.isSupport) {
             premiumGiftOptions = self.presentationInterfaceState.premiumGiftOptions
         } else {
             premiumGiftOptions = []
@@ -300,16 +329,12 @@ extension ChatControllerImpl {
                         attachmentController?.dismiss(animated: true)
                         self?.presentICloudFileGallery()
                     }, send: { [weak self] mediaReference in
-                        guard let strongSelf = self, let peerId = strongSelf.chatLocation.peerId else {
+                        guard let strongSelf = self else {
                             return
                         }
+                        
                         let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: mediaReference, threadId: strongSelf.chatLocation.threadId, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
-                        let _ = (enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: strongSelf.transformEnqueueMessages([message]))
-                                 |> deliverOnMainQueue).startStandalone(next: { [weak self] _ in
-                            if let strongSelf = self, strongSelf.presentationInterfaceState.subject != .scheduledMessages {
-                                strongSelf.chatDisplayNode.historyNode.scrollToEndOfHistory()
-                            }
-                        })
+                        strongSelf.sendMessages([message], media: true)
                     })
                     if let controller = controller as? AttachmentFileControllerImpl {
                         let _ = currentFilesController.swap(controller)
@@ -324,20 +349,30 @@ extension ChatControllerImpl {
                         return
                     }
                     let selfPeerId: PeerId
-                    if let peer = peer as? TelegramChannel, case .broadcast = peer.info {
-                        selfPeerId = peer.id
-                    } else if let peer = peer as? TelegramChannel, case .group = peer.info, peer.hasPermission(.canBeAnonymous) {
-                        selfPeerId = peer.id
+                    if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                        if let peer = peer as? TelegramChannel, case .broadcast = peer.info {
+                            selfPeerId = peer.id
+                        } else if let peer = peer as? TelegramChannel, case .group = peer.info, peer.hasPermission(.canBeAnonymous) {
+                            selfPeerId = peer.id
+                        } else {
+                            selfPeerId = strongSelf.context.account.peerId
+                        }
                     } else {
                         selfPeerId = strongSelf.context.account.peerId
                     }
                     let _ = (strongSelf.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: selfPeerId))
-                             |> deliverOnMainQueue).startStandalone(next: { [weak self] selfPeer in
+                    |> deliverOnMainQueue).startStandalone(next: { selfPeer in
                         guard let strongSelf = self, let selfPeer = selfPeer else {
                             return
                         }
-                        let hasLiveLocation = peer.id.namespace != Namespaces.Peer.SecretChat && peer.id != strongSelf.context.account.peerId && strongSelf.presentationInterfaceState.subject != .scheduledMessages
-                        let controller = LocationPickerController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, mode: .share(peer: EnginePeer(peer), selfPeer: selfPeer, hasLiveLocation: hasLiveLocation), completion: { [weak self] location, _, _, _, _ in
+                        let hasLiveLocation: Bool
+                        if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                            hasLiveLocation = peer.id.namespace != Namespaces.Peer.SecretChat && peer.id != strongSelf.context.account.peerId && strongSelf.presentationInterfaceState.subject != .scheduledMessages
+                        } else {
+                            hasLiveLocation = false
+                        }
+                        let sharePeer = (strongSelf.presentationInterfaceState.renderedPeer?.peer).flatMap(EnginePeer.init)
+                        let controller = LocationPickerController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, mode: .share(peer: sharePeer, selfPeer: selfPeer, hasLiveLocation: hasLiveLocation), completion: { location, _, _, _, _ in
                             guard let strongSelf = self else {
                                 return
                             }
@@ -519,73 +554,96 @@ extension ChatControllerImpl {
                         }
                     }))
                 case .poll:
-                    let controller = strongSelf.configurePollCreation()
-                    completion(controller, controller?.mediaPickerContext)
-                    strongSelf.controllerNavigationDisposable.set(nil)
+                    if let controller = strongSelf.configurePollCreation() as? AttachmentContainable {
+                        completion(controller, controller.mediaPickerContext)
+                        strongSelf.controllerNavigationDisposable.set(nil)
+                    }
                 case .gift:
-                    let premiumGiftOptions = strongSelf.presentationInterfaceState.premiumGiftOptions
-                    if !premiumGiftOptions.isEmpty {
-                        let controller = PremiumGiftAttachmentScreen(context: context, peerIds: [peer.id], options: premiumGiftOptions, source: .attachMenu, pushController: { [weak self] c in
+                    if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                        let premiumGiftOptions = strongSelf.presentationInterfaceState.premiumGiftOptions
+                        if !premiumGiftOptions.isEmpty {
+                            let controller = PremiumGiftAttachmentScreen(context: context, peerIds: [peer.id], options: premiumGiftOptions, source: .attachMenu, pushController: { [weak self] c in
+                                if let strongSelf = self {
+                                    strongSelf.push(c)
+                                }
+                            }, completion: { [weak self] in
+                                if let strongSelf = self {
+                                    strongSelf.hintPlayNextOutgoingGift()
+                                    strongSelf.attachmentController?.dismiss(animated: true)
+                                }
+                            })
+                            completion(controller, controller.mediaPickerContext)
+                            strongSelf.controllerNavigationDisposable.set(nil)
+                            
+                            let _ = ApplicationSpecificNotice.incrementDismissedPremiumGiftSuggestion(accountManager: context.sharedContext.accountManager, peerId: peer.id, timestamp: Int32(Date().timeIntervalSince1970)).startStandalone()
+                        }
+                    }
+                case let .app(bot):
+                    if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                        var payload: String?
+                        var fromAttachMenu = true
+                        if case let .bot(_, botPayload, _) = subject {
+                            payload = botPayload
+                            fromAttachMenu = false
+                        }
+                        let params = WebAppParameters(source: fromAttachMenu ? .attachMenu : .generic, peerId: peer.id, botId: bot.peer.id, botName: bot.shortName, url: nil, queryId: nil, payload: payload, buttonText: nil, keepAliveSignal: nil, forceHasSettings: false)
+                        let replyMessageSubject = strongSelf.presentationInterfaceState.interfaceState.replyMessageSubject
+                        let controller = WebAppController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, params: params, replyToMessageId: replyMessageSubject?.messageId, threadId: strongSelf.chatLocation.threadId)
+                        controller.openUrl = { [weak self] url, concealed, commit in
+                            self?.openUrl(url, concealed: concealed, forceExternal: true, commit: commit)
+                        }
+                        controller.getNavigationController = { [weak self] in
+                            return self?.effectiveNavigationController
+                        }
+                        controller.completion = { [weak self] in
                             if let strongSelf = self {
-                                strongSelf.push(c)
+                                strongSelf.updateChatPresentationInterfaceState(animated: true, interactive: false, {
+                                    $0.updatedInterfaceState { $0.withUpdatedReplyMessageSubject(nil) }
+                                })
+                                strongSelf.chatDisplayNode.historyNode.scrollToEndOfHistory()
                             }
-                        }, completion: { [weak self] in
-                            if let strongSelf = self {
-                                strongSelf.hintPlayNextOutgoingGift()
-                                strongSelf.attachmentController?.dismiss(animated: true)
-                            }
-                        })
+                        }
                         completion(controller, controller.mediaPickerContext)
                         strongSelf.controllerNavigationDisposable.set(nil)
                         
-                        let _ = ApplicationSpecificNotice.incrementDismissedPremiumGiftSuggestion(accountManager: context.sharedContext.accountManager, peerId: peer.id).startStandalone()
-                    }
-                case let .app(bot):
-                    var payload: String?
-                    var fromAttachMenu = true
-                    if case let .bot(_, botPayload, _) = subject {
-                        payload = botPayload
-                        fromAttachMenu = false
-                    }
-                    let params = WebAppParameters(source: fromAttachMenu ? .attachMenu : .generic, peerId: peer.id, botId: bot.peer.id, botName: bot.shortName, url: nil, queryId: nil, payload: payload, buttonText: nil, keepAliveSignal: nil, forceHasSettings: false)
-                    let replyMessageSubject = strongSelf.presentationInterfaceState.interfaceState.replyMessageSubject
-                    let controller = WebAppController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, params: params, replyToMessageId: replyMessageSubject?.messageId, threadId: strongSelf.chatLocation.threadId)
-                    controller.openUrl = { [weak self] url, concealed, commit in
-                        self?.openUrl(url, concealed: concealed, forceExternal: true, commit: commit)
-                    }
-                    controller.getNavigationController = { [weak self] in
-                        return self?.effectiveNavigationController
-                    }
-                    controller.completion = { [weak self] in
-                        if let strongSelf = self {
-                            strongSelf.updateChatPresentationInterfaceState(animated: true, interactive: false, {
-                                $0.updatedInterfaceState { $0.withUpdatedReplyMessageSubject(nil) }
+                        if bot.flags.contains(.notActivated) {
+                            let alertController = webAppTermsAlertController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, bot: bot, completion: { [weak self] allowWrite in
+                                guard let self else {
+                                    return
+                                }
+                                if bot.flags.contains(.showInSettingsDisclaimer) {
+                                    let _ = self.context.engine.messages.acceptAttachMenuBotDisclaimer(botId: bot.peer.id).startStandalone()
+                                }
+                                let _ = (self.context.engine.messages.addBotToAttachMenu(botId: bot.peer.id, allowWrite: allowWrite)
+                                         |> deliverOnMainQueue).startStandalone(error: { _ in
+                                }, completed: { [weak controller] in
+                                    controller?.refresh()
+                                })
+                            },
+                                                                             dismissed: {
+                                strongSelf.attachmentController?.dismiss(animated: true)
                             })
-                            strongSelf.chatDisplayNode.historyNode.scrollToEndOfHistory()
+                            strongSelf.present(alertController, in: .window(.root))
                         }
                     }
-                    completion(controller, controller.mediaPickerContext)
-                    strongSelf.controllerNavigationDisposable.set(nil)
-                    
-                    if bot.flags.contains(.notActivated) {
-                        let alertController = webAppTermsAlertController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, bot: bot, completion: { [weak self] allowWrite in
-                            guard let self else {
+                case .quickReply:
+                    let _ = (strongSelf.context.sharedContext.makeQuickReplySetupScreenInitialData(context: strongSelf.context)
+                    |> take(1)
+                    |> deliverOnMainQueue).start(next: { [weak strongSelf] initialData in
+                        guard let strongSelf else {
+                            return
+                        }
+                        
+                        let controller = QuickReplySetupScreen(context: strongSelf.context, initialData: initialData as! QuickReplySetupScreen.InitialData, mode: .select(completion: { [weak strongSelf] shortcutId in
+                            guard let strongSelf else {
                                 return
                             }
-                            if bot.flags.contains(.showInSettingsDisclaimer) {
-                                let _ = self.context.engine.messages.acceptAttachMenuBotDisclaimer(botId: bot.peer.id).startStandalone()
-                            }
-                            let _ = (self.context.engine.messages.addBotToAttachMenu(botId: bot.peer.id, allowWrite: allowWrite)
-                            |> deliverOnMainQueue).startStandalone(error: { _ in
-                            }, completed: { [weak controller] in
-                                controller?.refresh()
-                            })
-                        },
-                        dismissed: {
                             strongSelf.attachmentController?.dismiss(animated: true)
-                        })
-                        strongSelf.present(alertController, in: .window(.root))
-                    }
+                            strongSelf.interfaceInteraction?.sendShortcut(shortcutId)
+                        }))
+                        completion(controller, controller.mediaPickerContext)
+                        strongSelf.controllerNavigationDisposable.set(nil)
+                    })
                 default:
                     break
                 }
@@ -632,26 +690,28 @@ extension ChatControllerImpl {
             return entry ?? GeneratedMediaStoreSettings.defaultSettings
         }
         |> deliverOnMainQueue).startStandalone(next: { [weak self] settings in
-            guard let strongSelf = self, let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer else {
+            guard let strongSelf = self else {
                 return
             }
             strongSelf.chatDisplayNode.dismissInput()
 
             var bannedSendMedia: (Int32, Bool)?
             var canSendPolls = true
-            if let channel = peer as? TelegramChannel {
-                if let value = channel.hasBannedPermission(.banSendMedia) {
-                    bannedSendMedia = value
-                }
-                if channel.hasBannedPermission(.banSendPolls) != nil {
-                    canSendPolls = false
-                }
-            } else if let group = peer as? TelegramGroup {
-                if group.hasBannedPermission(.banSendMedia) {
-                    bannedSendMedia = (Int32.max, false)
-                }
-                if group.hasBannedPermission(.banSendPolls) {
-                    canSendPolls = false
+            if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                if let channel = peer as? TelegramChannel {
+                    if let value = channel.hasBannedPermission(.banSendMedia) {
+                        bannedSendMedia = value
+                    }
+                    if channel.hasBannedPermission(.banSendPolls) != nil {
+                        canSendPolls = false
+                    }
+                } else if let group = peer as? TelegramGroup {
+                    if group.hasBannedPermission(.banSendMedia) {
+                        bannedSendMedia = (Int32.max, false)
+                    }
+                    if group.hasBannedPermission(.banSendPolls) {
+                        canSendPolls = false
+                    }
                 }
             }
         
@@ -719,11 +779,15 @@ extension ChatControllerImpl {
             }
             
             var slowModeEnabled = false
-            if let channel = peer as? TelegramChannel, channel.isRestrictedBySlowmode {
-                slowModeEnabled = true
+            var hasSchedule = false
+            if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                if let channel = peer as? TelegramChannel, channel.isRestrictedBySlowmode {
+                    slowModeEnabled = true
+                }
+                hasSchedule = strongSelf.presentationInterfaceState.subject != .scheduledMessages && peer.id.namespace != Namespaces.Peer.SecretChat
             }
             
-            let controller = legacyAttachmentMenu(context: strongSelf.context, peer: peer, threadTitle: strongSelf.threadInfo?.title, chatLocation: strongSelf.chatLocation, editMediaOptions: menuEditMediaOptions, saveEditedPhotos: settings.storeEditedPhotos, allowGrouping: true, hasSchedule: strongSelf.presentationInterfaceState.subject != .scheduledMessages && peer.id.namespace != Namespaces.Peer.SecretChat, canSendPolls: canSendPolls, updatedPresentationData: strongSelf.updatedPresentationData, parentController: legacyController, recentlyUsedInlineBots: strongSelf.recentlyUsedInlineBotsValue, initialCaption: inputText, openGallery: {
+            let controller = legacyAttachmentMenu(context: strongSelf.context, peer: strongSelf.presentationInterfaceState.renderedPeer?.peer, threadTitle: strongSelf.threadInfo?.title, chatLocation: strongSelf.chatLocation, editMediaOptions: menuEditMediaOptions, saveEditedPhotos: settings.storeEditedPhotos, allowGrouping: true, hasSchedule: hasSchedule, canSendPolls: canSendPolls, updatedPresentationData: strongSelf.updatedPresentationData, parentController: legacyController, recentlyUsedInlineBots: strongSelf.recentlyUsedInlineBotsValue, initialCaption: inputText, openGallery: {
                 self?.presentOldMediaPicker(fileMode: false, editingMedia: editMediaOptions != nil, completion: { signals, silentPosting, scheduleTime in
                     if !inputText.string.isEmpty {
                         strongSelf.clearInputText()
@@ -735,7 +799,7 @@ extension ChatControllerImpl {
                     }
                 })
             }, openCamera: { [weak self] cameraView, menuController in
-                if let strongSelf = self, let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                if let strongSelf = self {
                     var enablePhoto = true
                     var enableVideo = true
                     
@@ -746,19 +810,21 @@ extension ChatControllerImpl {
                     var bannedSendPhotos: (Int32, Bool)?
                     var bannedSendVideos: (Int32, Bool)?
                     
-                    if let channel = peer as? TelegramChannel {
-                        if let value = channel.hasBannedPermission(.banSendPhotos) {
-                            bannedSendPhotos = value
-                        }
-                        if let value = channel.hasBannedPermission(.banSendVideos) {
-                            bannedSendVideos = value
-                        }
-                    } else if let group = peer as? TelegramGroup {
-                        if group.hasBannedPermission(.banSendPhotos) {
-                            bannedSendPhotos = (Int32.max, false)
-                        }
-                        if group.hasBannedPermission(.banSendVideos) {
-                            bannedSendVideos = (Int32.max, false)
+                    if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                        if let channel = peer as? TelegramChannel {
+                            if let value = channel.hasBannedPermission(.banSendPhotos) {
+                                bannedSendPhotos = value
+                            }
+                            if let value = channel.hasBannedPermission(.banSendVideos) {
+                                bannedSendVideos = value
+                            }
+                        } else if let group = peer as? TelegramGroup {
+                            if group.hasBannedPermission(.banSendPhotos) {
+                                bannedSendPhotos = (Int32.max, false)
+                            }
+                            if group.hasBannedPermission(.banSendVideos) {
+                                bannedSendVideos = (Int32.max, false)
+                            }
                         }
                     }
                     
@@ -769,7 +835,15 @@ extension ChatControllerImpl {
                         enableVideo = false
                     }
                     
-                    presentedLegacyCamera(context: strongSelf.context, peer: peer, chatLocation: strongSelf.chatLocation, cameraView: cameraView, menuController: menuController, parentController: strongSelf, editingMedia: editMediaOptions != nil, saveCapturedPhotos:  peer.id.namespace != Namespaces.Peer.SecretChat, mediaGrouping: true, initialCaption: inputText, hasSchedule: strongSelf.presentationInterfaceState.subject != .scheduledMessages && peer.id.namespace != Namespaces.Peer.SecretChat, enablePhoto: enablePhoto, enableVideo: enableVideo, sendMessagesWithSignals: { [weak self] signals, silentPosting, scheduleTime in
+                    var storeCapturedPhotos = false
+                    var hasSchedule = false
+                    if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                        storeCapturedPhotos = peer.id.namespace != Namespaces.Peer.SecretChat
+                        
+                        hasSchedule = strongSelf.presentationInterfaceState.subject != .scheduledMessages && peer.id.namespace != Namespaces.Peer.SecretChat
+                    }
+                    
+                    presentedLegacyCamera(context: strongSelf.context, peer: strongSelf.presentationInterfaceState.renderedPeer?.peer, chatLocation: strongSelf.chatLocation, cameraView: cameraView, menuController: menuController, parentController: strongSelf, editingMedia: editMediaOptions != nil, saveCapturedPhotos: storeCapturedPhotos, mediaGrouping: true, initialCaption: inputText, hasSchedule: hasSchedule, enablePhoto: enablePhoto, enableVideo: enableVideo, sendMessagesWithSignals: { [weak self] signals, silentPosting, scheduleTime in
                         if let strongSelf = self {
                             if editMediaOptions != nil {
                                 strongSelf.editMessageMediaWithLegacySignals(signals!)
@@ -927,7 +1001,7 @@ extension ChatControllerImpl {
     
     func presentICloudFileGallery(editingMessage: Bool = false) {
         let _ = (self.context.engine.data.get(
-            TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId),
+            TelegramEngine.EngineData.Item.Peer.Peer(id: self.context.account.peerId),
             TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false),
             TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: true)
         )
@@ -1063,9 +1137,6 @@ extension ChatControllerImpl {
     }
     
     func presentMediaPicker(subject: MediaPickerScreen.Subject = .assets(nil, .default), saveEditedPhotos: Bool, bannedSendPhotos: (Int32, Bool)?, bannedSendVideos: (Int32, Bool)?, present: @escaping (MediaPickerScreen, AttachmentMediaPickerContext?) -> Void, updateMediaPickerContext: @escaping (AttachmentMediaPickerContext?) -> Void, completion: @escaping ([Any], Bool, Int32?, @escaping (String) -> UIView?, @escaping () -> Void) -> Void) {
-        guard let peer = self.presentationInterfaceState.renderedPeer?.peer else {
-            return
-        }
         var isScheduledMessages = false
         if case .scheduledMessages = self.presentationInterfaceState.subject {
             isScheduledMessages = true
@@ -1073,7 +1144,7 @@ extension ChatControllerImpl {
         let controller = MediaPickerScreen(
             context: self.context,
             updatedPresentationData: self.updatedPresentationData,
-            peer: EnginePeer(peer),
+            peer: (self.presentationInterfaceState.renderedPeer?.peer).flatMap(EnginePeer.init),
             threadTitle: self.threadInfo?.title,
             chatLocation: self.chatLocation,
             isScheduledMessages: isScheduledMessages, 
@@ -1091,7 +1162,11 @@ extension ChatControllerImpl {
         }
         let mediaPickerContext = controller.mediaPickerContext
         controller.openCamera = { [weak self] cameraView in
-            self?.openCamera(cameraView: cameraView)
+            if let cameraView = cameraView as? TGAttachmentCameraView {
+                self?.openCamera(cameraView: cameraView)
+            } else {
+                self?.openCamera(cameraView: nil)
+            }
         }
         controller.presentWebSearch = { [weak self, weak controller] mediaGroups, activateOnDisplay in
             self?.presentWebSearch(editingMessage: false, attachment: true, activateOnDisplay: activateOnDisplay, present: { [weak controller] c, a in
@@ -1561,17 +1636,12 @@ extension ChatControllerImpl {
     }
     
     func openCamera(cameraView: TGAttachmentCameraView? = nil) {
-        guard let peer = self.presentationInterfaceState.renderedPeer?.peer else {
-            return
-        }
-        let _ = peer
-        
         let _ = (self.context.sharedContext.accountManager.transaction { transaction -> GeneratedMediaStoreSettings in
             let entry = transaction.getSharedData(ApplicationSpecificSharedDataKeys.generatedMediaStoreSettings)?.get(GeneratedMediaStoreSettings.self)
             return entry ?? GeneratedMediaStoreSettings.defaultSettings
         }
         |> deliverOnMainQueue).startStandalone(next: { [weak self] settings in
-            guard let strongSelf = self, let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer else {
+            guard let strongSelf = self else {
                 return
             }
             
@@ -1585,19 +1655,21 @@ extension ChatControllerImpl {
             var bannedSendPhotos: (Int32, Bool)?
             var bannedSendVideos: (Int32, Bool)?
             
-            if let channel = peer as? TelegramChannel {
-                if let value = channel.hasBannedPermission(.banSendPhotos) {
-                    bannedSendPhotos = value
-                }
-                if let value = channel.hasBannedPermission(.banSendVideos) {
-                    bannedSendVideos = value
-                }
-            } else if let group = peer as? TelegramGroup {
-                if group.hasBannedPermission(.banSendPhotos) {
-                    bannedSendPhotos = (Int32.max, false)
-                }
-                if group.hasBannedPermission(.banSendVideos) {
-                    bannedSendVideos = (Int32.max, false)
+            if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                if let channel = peer as? TelegramChannel {
+                    if let value = channel.hasBannedPermission(.banSendPhotos) {
+                        bannedSendPhotos = value
+                    }
+                    if let value = channel.hasBannedPermission(.banSendVideos) {
+                        bannedSendVideos = value
+                    }
+                } else if let group = peer as? TelegramGroup {
+                    if group.hasBannedPermission(.banSendPhotos) {
+                        bannedSendPhotos = (Int32.max, false)
+                    }
+                    if group.hasBannedPermission(.banSendVideos) {
+                        bannedSendVideos = (Int32.max, false)
+                    }
                 }
             }
             
@@ -1608,10 +1680,15 @@ extension ChatControllerImpl {
                 enableVideo = false
             }
             
-            let storeCapturedMedia = peer.id.namespace != Namespaces.Peer.SecretChat
+            var storeCapturedMedia = false
+            var hasSchedule = false
+            if let peer = strongSelf.presentationInterfaceState.renderedPeer?.peer {
+                storeCapturedMedia = peer.id.namespace != Namespaces.Peer.SecretChat
+                hasSchedule = strongSelf.presentationInterfaceState.subject != .scheduledMessages && peer.id.namespace != Namespaces.Peer.SecretChat
+            }
             let inputText = strongSelf.presentationInterfaceState.interfaceState.effectiveInputState.inputText
             
-            presentedLegacyCamera(context: strongSelf.context, peer: peer, chatLocation: strongSelf.chatLocation, cameraView: cameraView, menuController: nil, parentController: strongSelf, attachmentController: self?.attachmentController, editingMedia: false, saveCapturedPhotos: storeCapturedMedia, mediaGrouping: true, initialCaption: inputText, hasSchedule: strongSelf.presentationInterfaceState.subject != .scheduledMessages && peer.id.namespace != Namespaces.Peer.SecretChat, enablePhoto: enablePhoto, enableVideo: enableVideo, sendMessagesWithSignals: { [weak self] signals, silentPosting, scheduleTime in
+            presentedLegacyCamera(context: strongSelf.context, peer: strongSelf.presentationInterfaceState.renderedPeer?.peer, chatLocation: strongSelf.chatLocation, cameraView: cameraView, menuController: nil, parentController: strongSelf, attachmentController: self?.attachmentController, editingMedia: false, saveCapturedPhotos: storeCapturedMedia, mediaGrouping: true, initialCaption: inputText, hasSchedule: hasSchedule, enablePhoto: enablePhoto, enableVideo: enableVideo, sendMessagesWithSignals: { [weak self] signals, silentPosting, scheduleTime in
                 if let strongSelf = self {
                     strongSelf.enqueueMediaMessages(signals: signals, silentPosting: silentPosting, scheduleTime: scheduleTime > 0 ? scheduleTime : nil)
                     if !inputText.string.isEmpty {
@@ -1649,5 +1726,93 @@ extension ChatControllerImpl {
                 self?.attachmentController?.scrollToTop?()
             })
         })
+    }
+    
+    func openStickerEditor() {
+        self.chatDisplayNode.dismissInput()
+        
+        var dismissImpl: (() -> Void)?
+        let mainController = self.context.sharedContext.makeStickerMediaPickerScreen(
+            context: self.context,
+            getSourceRect: { return nil },
+            completion: { [weak self] result, transitionView, transitionRect, transitionImage, fromCamera, transitionOut, cancelled in
+                guard let self else {
+                    return
+                }
+                let subject: Signal<MediaEditorScreen.Subject?, NoError>
+                if let asset = result as? PHAsset {
+                    subject = .single(.asset(asset))
+                } else if let image = result as? UIImage {
+                    subject = .single(.image(image, PixelDimensions(image.size), nil, .bottomRight))
+                } else if let result = result as? Signal<CameraScreen.Result, NoError> {
+                    subject = result
+                    |> map { value -> MediaEditorScreen.Subject? in
+                        switch value {
+                        case .pendingImage:
+                            return nil
+                        case let .image(image):
+                            return .image(image.image, PixelDimensions(image.image.size), nil, .topLeft)
+                        default:
+                            return nil
+                        }
+                    }
+                } else {
+                    subject = .single(.empty(PixelDimensions(width: 1080, height: 1920)))
+                }
+                
+                let editorController = MediaEditorScreen(
+                    context: self.context,
+                    mode: .stickerEditor(mode: .generic),
+                    subject: subject,
+                    transitionIn: fromCamera ? .camera : transitionView.flatMap({ .gallery(
+                        MediaEditorScreen.TransitionIn.GalleryTransitionIn(
+                            sourceView: $0,
+                            sourceRect: transitionRect,
+                            sourceImage: transitionImage
+                        )
+                    ) }),
+                    transitionOut: { finished, isNew in
+                        if !finished, let transitionView {
+                            return MediaEditorScreen.TransitionOut(
+                                destinationView: transitionView,
+                                destinationRect: transitionView.bounds,
+                                destinationCornerRadius: 0.0
+                            )
+                        }
+                        return nil
+                    }, completion: { [weak self] result, commit in
+                        dismissImpl?()
+                        self?.chatDisplayNode.dismissInput()
+                        
+                        Queue.mainQueue().after(0.1) {
+                            commit({})
+                            if case let .sticker(file, _) = result.media {
+                                self?.enqueueStickerFile(file)
+                            }
+                        }
+                    } as (MediaEditorScreen.Result, @escaping (@escaping () -> Void) -> Void) -> Void
+                )
+                editorController.cancelled = { _ in
+                    cancelled()
+                }
+                editorController.sendSticker = { [weak self] file, sourceView, sourceRect in
+                    return self?.interfaceInteraction?.sendSticker(file, true, sourceView, sourceRect, nil, []) ?? false
+                }
+                self.push(editorController)
+            },
+            dismissed: {}
+        )
+        dismissImpl = { [weak mainController] in
+            if let mainController, let navigationController = mainController.navigationController {
+                var viewControllers = navigationController.viewControllers
+                viewControllers = viewControllers.filter { c in
+                    return !(c is CameraScreen) && c !== mainController
+                }
+                navigationController.setViewControllers(viewControllers, animated: false)
+            }
+        }
+        mainController.navigationPresentation = .flatModal
+        mainController.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: .portrait)
+        self.push(mainController)
     }
 }

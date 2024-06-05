@@ -209,8 +209,31 @@ final class StoryContentCaptionComponent: Component {
         
         override init(frame: CGRect) {
             self.shadowGradientView = UIImageView()
-            if let image = StoryContentCaptionComponent.View.shadowImage {
-                self.shadowGradientView.image = image.stretchableImage(withLeftCapWidth: 0, topCapHeight: Int(image.size.height - 1.0))
+            if let _ = StoryContentCaptionComponent.View.shadowImage {
+                let height: CGFloat = 128.0
+                let baseGradientAlpha: CGFloat = 0.8
+                let numSteps = 8
+                let firstStep = 0
+                let firstLocation = 0.0
+                let colors = (0 ..< numSteps).map { i -> UIColor in
+                    if i < firstStep {
+                        return UIColor(white: 1.0, alpha: 1.0)
+                    } else {
+                        let step: CGFloat = CGFloat(i - firstStep) / CGFloat(numSteps - firstStep - 1)
+                        let value: CGFloat = 1.0 - bezierPoint(0.42, 0.0, 0.58, 1.0, step)
+                        return UIColor(white: 0.0, alpha: baseGradientAlpha * value)
+                    }
+                }
+                let locations = (0 ..< numSteps).map { i -> CGFloat in
+                    if i < firstStep {
+                        return 0.0
+                    } else {
+                        let step: CGFloat = CGFloat(i - firstStep) / CGFloat(numSteps - firstStep - 1)
+                        return (firstLocation + (1.0 - firstLocation) * step)
+                    }
+                }
+                
+                self.shadowGradientView.image = generateGradientImage(size: CGSize(width: 8.0, height: height), colors: colors.reversed(), locations: locations.reversed().map { 1.0 - $0 })!.stretchableImage(withLeftCapWidth: 0, topCapHeight: Int(height - 1.0))
             }
             
             self.scrollViewContainer = UIView()
@@ -386,7 +409,8 @@ final class StoryContentCaptionComponent: Component {
             
             transition.setBounds(view: self.textSelectionKnobContainer, bounds: CGRect(origin: CGPoint(x: 0.0, y: self.scrollView.bounds.minY), size: CGSize()))
             
-            let shadowOverflow: CGFloat = 58.0
+            let shadowHeight: CGFloat = self.shadowGradientView.image?.size.height ?? 100.0
+            let shadowOverflow: CGFloat = floor(shadowHeight * 0.6)
             let shadowFrame = CGRect(origin: CGPoint(x: 0.0, y:  -self.scrollView.contentOffset.y + itemLayout.containerSize.height - itemLayout.visibleTextHeight - itemLayout.verticalInset - shadowOverflow), size: CGSize(width: itemLayout.containerSize.width, height: itemLayout.visibleTextHeight + itemLayout.verticalInset + shadowOverflow))
             
             let shadowGradientFrame = CGRect(origin: CGPoint(x: shadowFrame.minX, y: shadowFrame.minY), size: CGSize(width: shadowFrame.width, height: self.scrollView.contentSize.height + 1000.0))
@@ -674,6 +698,7 @@ final class StoryContentCaptionComponent: Component {
                 let authorName: String
                 let isChannel: Bool
                 let text: String?
+                let entities: [MessageTextEntity]
                 
                 switch forwardInfo {
                 case let .known(peer, _, _):
@@ -682,6 +707,7 @@ final class StoryContentCaptionComponent: Component {
                     
                     if let story = self.forwardInfoStory {
                         text = story.text
+                        entities = story.entities
                     } else if self.forwardInfoDisposable == nil, let forwardInfoStory = component.forwardInfoStory {
                         self.forwardInfoDisposable = (forwardInfoStory
                         |> deliverOnMainQueue).start(next: { story in
@@ -693,13 +719,16 @@ final class StoryContentCaptionComponent: Component {
                             }
                         })
                         text = ""
+                        entities = []
                     } else {
                         text = ""
+                        entities = []
                     }
                 case let .unknown(name, _):
                     authorName = name
                     isChannel = false
                     text = ""
+                    entities = []
                 }
                 
                 if let text {
@@ -717,8 +746,10 @@ final class StoryContentCaptionComponent: Component {
                             PlainButtonComponent(
                                 content: AnyComponent(
                                     ForwardInfoPanelComponent(
+                                        context: component.context,
                                         authorName: authorName,
                                         text: text,
+                                        entities: entities,
                                         isChannel: isChannel,
                                         isVibrant: false,
                                         fillsWidth: false

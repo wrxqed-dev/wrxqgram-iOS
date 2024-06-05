@@ -139,6 +139,11 @@ swift_library(
         "//submodules/TelegramUI/Components/Settings/BoostLevelIconComponent",
         "//submodules/Components/MultilineTextComponent",
         "//submodules/TelegramUI/Components/Settings/PeerNameColorItem",
+        "//submodules/TelegramUI/Components/PlainButtonComponent",
+        "//submodules/TelegramUI/Components/TextLoadingEffect",
+        "//submodules/TelegramUI/Components/Settings/BirthdayPickerScreen",
+        "//submodules/TelegramUI/Components/Settings/PeerSelectionScreen",
+        "//submodules/ConfettiEffect",
     ],
     visibility = [
         "//visibility:public",

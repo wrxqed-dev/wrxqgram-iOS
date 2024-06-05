@@ -340,12 +340,6 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                 hasAvatar = true
             }
             
-            if let adAttribute = message.adAttribute {
-                if adAttribute.displayAvatar {
-                    hasAvatar = adAttribute.displayAvatar
-                }
-            }
-            
             if hasAvatar {
                 if let effectiveAuthor = effectiveAuthor {
                     var storyStats: PeerStoryStats?
@@ -365,7 +359,10 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
         }
         self.avatarHeader = avatarHeader
         
-        var headers: [ListViewItemHeader] = [self.dateHeader]
+        var headers: [ListViewItemHeader] = []
+        if !self.disableDate {
+            headers.append(self.dateHeader)
+        }
         if case .messageOptions = associatedData.subject {
             headers = []
         }

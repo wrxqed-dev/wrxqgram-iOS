@@ -60,6 +60,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
     private let context: AccountContext
     private let size: CGSize
     private let hasBin: Bool
+    public let isStickerEditor: Bool
     
     weak var drawingView: DrawingView?
     public weak var selectionContainerView: DrawingSelectionContainerView?
@@ -95,16 +96,17 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
     private let yAxisView = UIView()
     private let angleLayer = SimpleShapeLayer()
     private let bin = ComponentView<Empty>()
-    
+
     public var onInteractionUpdated: (Bool) -> Void = { _ in }
     public var edgePreviewUpdated: (Bool) -> Void = { _ in }
     
     private let hapticFeedback = HapticFeedback()
     
-    public init(context: AccountContext, size: CGSize, hasBin: Bool = false) {
+    public init(context: AccountContext, size: CGSize, hasBin: Bool = false, isStickerEditor: Bool = false) {
         self.context = context
         self.size = size
         self.hasBin = hasBin
+        self.isStickerEditor = isStickerEditor
                 
         super.init(frame: CGRect(origin: .zero, size: size))
                 
@@ -152,6 +154,12 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    deinit {
+        self.eachView { entityView in
+            entityView.reset()
+        }
     }
     
     public override func layoutSubviews() {
@@ -499,6 +507,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 self.hasSelectionChanged(false)
                 view.selectionView?.removeFromSuperview()
             }
+            view.reset()
             if animated {
                 view.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak view] _ in
                     view?.removeFromSuperview()
@@ -537,6 +546,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 if view.entity.isMedia {
                     continue
                 }
+                view.reset()
                 if let selectionView = view.selectionView {
                     selectionView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.1, removeOnCompletion: false, completion: { [weak selectionView] _ in
                         selectionView?.removeFromSuperview()
@@ -555,6 +565,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 if view.entity.isMedia {
                     continue
                 }
+                view.reset()
                 view.selectionView?.removeFromSuperview()
                 view.removeFromSuperview()
             }
@@ -841,7 +852,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
         } else if self.autoSelectEntities, gestureRecognizer.numberOfTouches == 1, let viewToSelect = self.entity(at: location) {
             self.selectEntity(viewToSelect.entity, animate: false)
             self.onInteractionUpdated(true)
-        } else if gestureRecognizer.numberOfTouches == 2, let mediaEntityView = self.subviews.first(where: { $0 is DrawingEntityMediaView }) as? DrawingEntityMediaView {
+        } else if gestureRecognizer.numberOfTouches == 2 || (self.isStickerEditor && self.autoSelectEntities), let mediaEntityView = self.subviews.first(where: { $0 is DrawingEntityMediaView }) as? DrawingEntityMediaView {
             mediaEntityView.handlePan(gestureRecognizer)
         }
     }
@@ -942,6 +953,12 @@ public class DrawingEntityView: UIView {
     
     var selectionBounds: CGRect {
         return self.bounds
+    }
+    
+    func reset() {
+        self.onSnapUpdated = { _, _ in }
+        self.onPositionUpdated = { _ in }
+        self.onInteractionUpdated = { _ in }
     }
     
     func animateInsertion() {

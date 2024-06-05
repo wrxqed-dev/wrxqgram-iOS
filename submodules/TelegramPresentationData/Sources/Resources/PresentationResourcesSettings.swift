@@ -11,12 +11,48 @@ private func drawBorder(context: CGContext, rect: CGRect) {
     context.strokePath()
 }
 
-private func renderIcon(name: String) -> UIImage? {
+private func addRoundedRectPath(context: CGContext, rect: CGRect, radius: CGFloat) {
+    context.saveGState()
+    context.translateBy(x: rect.minX, y: rect.minY)
+    context.scaleBy(x: radius, y: radius)
+    let fw = rect.width / radius
+    let fh = rect.height / radius
+    context.move(to: CGPoint(x: fw, y: fh / 2.0))
+    context.addArc(tangent1End: CGPoint(x: fw, y: fh), tangent2End: CGPoint(x: fw/2, y: fh), radius: 1.0)
+    context.addArc(tangent1End: CGPoint(x: 0, y: fh), tangent2End: CGPoint(x: 0, y: fh/2), radius: 1)
+    context.addArc(tangent1End: CGPoint(x: 0, y: 0), tangent2End: CGPoint(x: fw/2, y: 0), radius: 1)
+    context.addArc(tangent1End: CGPoint(x: fw, y: 0), tangent2End: CGPoint(x: fw, y: fh/2), radius: 1)
+    context.closePath()
+    context.restoreGState()
+}
+
+private func renderIcon(name: String, scaleFactor: CGFloat = 1.0, backgroundColors: [UIColor]? = nil) -> UIImage? {
     return generateImage(CGSize(width: 29.0, height: 29.0), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)
         context.clear(bounds)
-        if let image = UIImage(bundleImageName: name)?.cgImage {
-            context.draw(image, in: bounds)
+        
+        if let backgroundColors {
+            addRoundedRectPath(context: context, rect: CGRect(origin: CGPoint(), size: size), radius: 7.0)
+            context.clip()
+            
+            var locations: [CGFloat] = [0.0, 1.0]
+            let colors: [CGColor] = backgroundColors.map(\.cgColor)
+            
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: &locations)!
+            
+            context.drawLinearGradient(gradient, start: CGPoint(x: size.width, y: size.height), end: CGPoint(x: 0.0, y: 0.0), options: CGGradientDrawingOptions())
+            
+            context.resetClip()
+            if let image = generateTintedImage(image: UIImage(bundleImageName: name), color: .white), let cgImage = image.cgImage {
+                let imageSize = CGSize(width: image.size.width * scaleFactor, height: image.size.height * scaleFactor)
+                context.draw(cgImage, in: CGRect(origin: CGPoint(x: (bounds.width - imageSize.width) * 0.5, y: (bounds.height - imageSize.height) * 0.5), size: imageSize))
+            }
+        } else {
+            if let image = UIImage(bundleImageName: name), let cgImage = image.cgImage {
+                let imageSize = CGSize(width: image.size.width * scaleFactor, height: image.size.height * scaleFactor)
+                context.draw(cgImage, in: CGRect(origin: CGPoint(x: (bounds.width - imageSize.width) * 0.5, y: (bounds.height - imageSize.height) * 0.5), size: imageSize))
+            }
         }
     })
 }
@@ -36,8 +72,11 @@ public struct PresentationResourcesSettings {
     public static let language = renderIcon(name: "Settings/Menu/Language")
     public static let deleteAccount = renderIcon(name: "Chat/Info/GroupRemovedIcon")
     public static let powerSaving = renderIcon(name: "Settings/Menu/PowerSaving")
-    public static let stories = renderIcon(name: "Settings/Menu/Stories")
+    public static let stories = renderIcon(name: "Premium/Perk/Stories", scaleFactor: 0.97, backgroundColors: [UIColor(rgb: 0x5856D6)])
     public static let premiumGift = renderIcon(name: "Settings/Menu/Gift")
+    public static let business = renderIcon(name: "Settings/Menu/Business", backgroundColors: [UIColor(rgb: 0xA95CE3), UIColor(rgb: 0xF16B80)])
+    public static let myProfile = renderIcon(name: "Settings/Menu/Profile")
+    public static let reactions = renderIcon(name: "Settings/Menu/Reactions")
     
     public static let premium = generateImage(CGSize(width: 29.0, height: 29.0), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)

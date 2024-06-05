@@ -217,6 +217,9 @@ private final class AttachButtonComponent: CombinedComponent {
                 name = ""
                 imageName = ""
                 imageFile = nil
+            case .quickReply:
+                name = strings.Attachment_Reply
+                imageName = "Chat/Attach Menu/Reply"
             }
 
             let tintColor = component.isSelected ? component.theme.rootController.tabBar.selectedIconColor : component.theme.rootController.tabBar.iconColor
@@ -677,7 +680,7 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
     }
 }
 
-final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
+final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
     private let context: AccountContext
     private let isScheduledMessages: Bool
     private var presentationData: PresentationData
@@ -737,7 +740,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         
         self.makeEntityInputView = makeEntityInputView
                 
-        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(.default), chatLocation: chatLocation ?? .peer(id: context.account.peerId), subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil, replyMessage: nil, accountPeerColor: nil)
+        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(.default), chatLocation: chatLocation ?? .peer(id: context.account.peerId), subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil, replyMessage: nil, accountPeerColor: nil, businessIntro: nil)
         
         self.containerNode = ASDisplayNode()
         self.containerNode.clipsToBounds = true
@@ -821,6 +824,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, sendContextResult: { _, _, _, _ in
             return false
         }, sendBotCommand: { _, _ in
+        }, sendShortcut: { _ in
+        }, openEditShortcuts: {
         }, sendBotStart: { _ in
         }, botSwitchChatWithPayload: { _, _ in
         }, beginMediaRecording: { _ in
@@ -1021,7 +1026,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             self.containerNode.layer.cornerCurve = .continuous
         }
     
-        self.scrollNode.view.delegate = self
+        self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.scrollNode.view.showsHorizontalScrollIndicator = false
         self.scrollNode.view.showsVerticalScrollIndicator = false
         
@@ -1181,6 +1186,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 accessibilityTitle = bot.shortName
             case .standalone:
                 accessibilityTitle = ""
+            case .quickReply:
+                accessibilityTitle = self.presentationData.strings.Attachment_Reply
             }
             buttonView.isAccessibilityElement = true
             buttonView.accessibilityLabel = accessibilityTitle

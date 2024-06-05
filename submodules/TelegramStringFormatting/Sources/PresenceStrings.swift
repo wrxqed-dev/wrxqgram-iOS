@@ -107,6 +107,88 @@ public func stringForMonth(strings: PresentationStrings, month: Int32, ofYear ye
     }
 }
 
+func monthAtIndex(_ index: Int, strings: PresentationStrings) -> String {
+    switch index {
+    case 0:
+        return strings.Month_ShortJanuary
+    case 1:
+        return strings.Month_ShortFebruary
+    case 2:
+        return strings.Month_ShortMarch
+    case 3:
+        return strings.Month_ShortApril
+    case 4:
+        return strings.Month_ShortMay
+    case 5:
+        return strings.Month_ShortJune
+    case 6:
+        return strings.Month_ShortJuly
+    case 7:
+        return strings.Month_ShortAugust
+    case 8:
+        return strings.Month_ShortSeptember
+    case 9:
+        return strings.Month_ShortOctober
+    case 10:
+        return strings.Month_ShortNovember
+    case 11:
+        return strings.Month_ShortDecember
+    default:
+        return ""
+    }
+}
+
+public func stringForCompactDate(timestamp: Int32, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat) -> String {
+    var t: time_t = time_t(timestamp)
+    var timeinfo: tm = tm()
+    localtime_r(&t, &timeinfo)
+    
+    return "\(shortStringForDayOfWeek(strings: strings, day: timeinfo.tm_wday)) \(timeinfo.tm_mday) \(monthAtIndex(Int(timeinfo.tm_mon), strings: strings))"
+}
+
+public func stringForCompactBirthday(_ birthday: TelegramBirthday, strings: PresentationStrings, showAge: Bool = false) -> String {
+    var components: [String] = []
+    components.append("\(birthday.day)")
+    components.append(monthAtIndex(Int(birthday.month) - 1, strings: strings))
+    if let year = birthday.year {
+        components.append("\(year)")
+        
+        if showAge {
+            var dateComponents = DateComponents()
+            dateComponents.day = Int(birthday.day)
+            dateComponents.month = Int(birthday.month)
+            dateComponents.year = Int(year)
+             
+            let calendar = Calendar.current
+            if let birthDate = calendar.date(from: dateComponents) {
+                if let age = calendar.dateComponents([.year], from: birthDate, to: Date()).year, age > 0 {
+                    components.append("(\(strings.UserInfo_Age(Int32(age))))")
+                }
+            }
+        }
+    }
+
+    return components.joined(separator: " ")
+}
+
+public func ageForBirthday(_ birthday: TelegramBirthday) -> Int? {
+    guard let year = birthday.year else {
+        return nil
+    }
+    var dateComponents = DateComponents()
+    dateComponents.day = Int(birthday.day)
+    dateComponents.month = Int(birthday.month)
+    dateComponents.year = Int(year)
+     
+    let calendar = Calendar.current
+    if let birthDate = calendar.date(from: dateComponents) {
+        if let age = calendar.dateComponents([.year], from: birthDate, to: Date()).year {
+            return age
+        }
+    }
+    return nil
+}
+
 public enum RelativeTimestampFormatDay {
     case today
     case yesterday
@@ -127,15 +209,15 @@ public func stringForUserPresence(strings: PresentationStrings, day: RelativeTim
 private func humanReadableStringForTimestamp(strings: PresentationStrings, day: RelativeTimestampFormatDay, dateTimeFormat: PresentationDateTimeFormat, hours: Int32, minutes: Int32, format: HumanReadableStringFormat? = nil) -> PresentationStrings.FormattedString {
     let result: PresentationStrings.FormattedString
     switch day {
-        case .today:
-            let string = stringForShortTimestamp(hours: hours, minutes: minutes, dateTimeFormat: dateTimeFormat)
-            result = format?.todayFormatString(string) ?? strings.Time_TodayAt(string)
-        case .yesterday:
-            let string = stringForShortTimestamp(hours: hours, minutes: minutes, dateTimeFormat: dateTimeFormat)
-            result = format?.yesterdayFormatString(string) ?? strings.Time_YesterdayAt(string)
-        case .tomorrow:
-            let string = stringForShortTimestamp(hours: hours, minutes: minutes, dateTimeFormat: dateTimeFormat)
-            result = format?.tomorrowFormatString(string) ?? strings.Time_TomorrowAt(string)
+    case .today:
+        let string = stringForShortTimestamp(hours: hours, minutes: minutes, dateTimeFormat: dateTimeFormat)
+        result = format?.todayFormatString(string) ?? strings.Time_TodayAt(string)
+    case .yesterday:
+        let string = stringForShortTimestamp(hours: hours, minutes: minutes, dateTimeFormat: dateTimeFormat)
+        result = format?.yesterdayFormatString(string) ?? strings.Time_YesterdayAt(string)
+    case .tomorrow:
+        let string = stringForShortTimestamp(hours: hours, minutes: minutes, dateTimeFormat: dateTimeFormat)
+        result = format?.tomorrowFormatString(string) ?? strings.Time_TomorrowAt(string)
         
     }
     return result
@@ -146,17 +228,20 @@ public struct HumanReadableStringFormat {
     let tomorrowFormatString: (String) -> PresentationStrings.FormattedString
     let todayFormatString: (String) -> PresentationStrings.FormattedString
     let yesterdayFormatString: (String) -> PresentationStrings.FormattedString
+    let daysFormatString: ((Int) -> PresentationStrings.FormattedString)?
     
     public init(
         dateFormatString: @escaping (String) -> PresentationStrings.FormattedString,
         tomorrowFormatString: @escaping (String) -> PresentationStrings.FormattedString,
         todayFormatString: @escaping (String) -> PresentationStrings.FormattedString,
-        yesterdayFormatString: @escaping (String) -> PresentationStrings.FormattedString = { PresentationStrings.FormattedString(string: $0, ranges: []) }
+        yesterdayFormatString: @escaping (String) -> PresentationStrings.FormattedString = { PresentationStrings.FormattedString(string: $0, ranges: []) },
+        daysFormatString: ((Int) -> PresentationStrings.FormattedString)? = nil
     ) {
         self.dateFormatString = dateFormatString
         self.tomorrowFormatString = tomorrowFormatString
         self.todayFormatString = todayFormatString
         self.yesterdayFormatString = yesterdayFormatString
+        self.daysFormatString = daysFormatString
     }
 }
 
@@ -191,6 +276,8 @@ public func humanReadableStringForTimestamp(strings: PresentationStrings, dateTi
             day = .tomorrow
         }
         return humanReadableStringForTimestamp(strings: strings, day: day, dateTimeFormat: dateTimeFormat, hours: timeinfo.tm_hour, minutes: timeinfo.tm_min, format: format)
+    } else if dayDifference < 7, let daysFormatString = format?.daysFormatString {
+        return daysFormatString(Int(dayDifference))
     } else {
         let string: String
         if alwaysShowTime {
@@ -359,37 +446,6 @@ public func stringForRelativeLiveLocationUpdateTimestamp(strings: PresentationSt
         }
     } else {
         return stringForTimestamp(day: timeinfo.tm_mday, month: timeinfo.tm_mon + 1, dateTimeFormat: dateTimeFormat)
-    }
-}
-
-private func monthAtIndex(_ index: Int, strings: PresentationStrings) -> String {
-    switch index {
-        case 0:
-            return strings.Month_GenJanuary
-        case 1:
-            return strings.Month_GenFebruary
-        case 2:
-            return strings.Month_GenMarch
-        case 3:
-            return strings.Month_GenApril
-        case 4:
-            return strings.Month_GenMay
-        case 5:
-            return strings.Month_GenJune
-        case 6:
-            return strings.Month_GenJuly
-        case 7:
-            return strings.Month_GenAugust
-        case 8:
-            return strings.Month_GenSeptember
-        case 9:
-            return strings.Month_GenOctober
-        case 10:
-            return strings.Month_GenNovember
-        case 11:
-            return strings.Month_GenDecember
-        default:
-            return ""
     }
 }
 

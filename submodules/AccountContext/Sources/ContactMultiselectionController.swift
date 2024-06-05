@@ -45,6 +45,9 @@ public enum ContactMultiselectionControllerMode {
         public var chatListFilters: [ChatListFilter]?
         public var displayAutoremoveTimeout: Bool
         public var displayPresence: Bool
+        public var onlyUsers: Bool
+        public var disableChannels: Bool
+        public var disableBots: Bool
         
         public init(
             title: String,
@@ -53,7 +56,10 @@ public enum ContactMultiselectionControllerMode {
             additionalCategories: ContactMultiselectionControllerAdditionalCategories?,
             chatListFilters: [ChatListFilter]?,
             displayAutoremoveTimeout: Bool = false,
-            displayPresence: Bool = false
+            displayPresence: Bool = false,
+            onlyUsers: Bool = false,
+            disableChannels: Bool = false,
+            disableBots: Bool = false
         ) {
             self.title = title
             self.searchPlaceholder = searchPlaceholder
@@ -62,6 +68,9 @@ public enum ContactMultiselectionControllerMode {
             self.chatListFilters = chatListFilters
             self.displayAutoremoveTimeout = displayAutoremoveTimeout
             self.displayPresence = displayPresence
+            self.onlyUsers = onlyUsers
+            self.disableChannels = disableChannels
+            self.disableBots = disableBots
         }
     }
     
@@ -69,7 +78,7 @@ public enum ContactMultiselectionControllerMode {
     case peerSelection(searchChatList: Bool, searchGroups: Bool, searchChannels: Bool)
     case channelCreation
     case chatSelection(ChatSelection)
-    case premiumGifting
+    case premiumGifting(birthdays: [EnginePeer.Id: TelegramBirthday]?, selectToday: Bool)
     case requestedUsersSelection
 }
 
@@ -87,24 +96,30 @@ public final class ContactMultiselectionControllerParams {
     public let options: [ContactListAdditionalOption]
     public let filters: [ContactListFilter]
     public let onlyWriteable: Bool
+    public let isGroupInvitation: Bool
     public let isPeerEnabled: ((EnginePeer) -> Bool)?
     public let attemptDisabledItemSelection: ((EnginePeer, ChatListDisabledPeerReason) -> Void)?
     public let alwaysEnabled: Bool
     public let limit: Int32?
     public let reachedLimit: ((Int32) -> Void)?
-
-    public init(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)? = nil, mode: ContactMultiselectionControllerMode, options: [ContactListAdditionalOption], filters: [ContactListFilter] = [.excludeSelf], onlyWriteable: Bool = false, isPeerEnabled: ((EnginePeer) -> Bool)? = nil, attemptDisabledItemSelection: ((EnginePeer, ChatListDisabledPeerReason) -> Void)? = nil, alwaysEnabled: Bool = false, limit: Int32? = nil, reachedLimit: ((Int32) -> Void)? = nil) {
+    public let openProfile: ((EnginePeer) -> Void)?
+    public let sendMessage: ((EnginePeer) -> Void)?
+    
+    public init(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)? = nil, mode: ContactMultiselectionControllerMode, options: [ContactListAdditionalOption], filters: [ContactListFilter] = [.excludeSelf], onlyWriteable: Bool = false, isGroupInvitation: Bool = false, isPeerEnabled: ((EnginePeer) -> Bool)? = nil, attemptDisabledItemSelection: ((EnginePeer, ChatListDisabledPeerReason) -> Void)? = nil, alwaysEnabled: Bool = false, limit: Int32? = nil, reachedLimit: ((Int32) -> Void)? = nil, openProfile: ((EnginePeer) -> Void)? = nil, sendMessage: ((EnginePeer) -> Void)? = nil) {
         self.context = context
         self.updatedPresentationData = updatedPresentationData
         self.mode = mode
         self.options = options
         self.filters = filters
         self.onlyWriteable = onlyWriteable
+        self.isGroupInvitation = isGroupInvitation
         self.isPeerEnabled = isPeerEnabled
         self.attemptDisabledItemSelection = attemptDisabledItemSelection
         self.alwaysEnabled = alwaysEnabled
         self.limit = limit
         self.reachedLimit = reachedLimit
+        self.openProfile = openProfile
+        self.sendMessage = sendMessage
     }
 }
 

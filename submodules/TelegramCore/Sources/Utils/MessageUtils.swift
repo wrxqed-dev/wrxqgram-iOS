@@ -181,6 +181,36 @@ func messagesIdsGroupedByPeerId(_ ids: ReferencedReplyMessageIds) -> [PeerId: Re
     return dict
 }
 
+func messagesIdsGroupedByPeerId(_ ids: Set<MessageAndThreadId>) -> [PeerAndThreadId: [MessageId]] {
+    var dict: [PeerAndThreadId: [MessageId]] = [:]
+    
+    for id in ids {
+        let peerAndThreadId = PeerAndThreadId(peerId: id.messageId.peerId, threadId: id.threadId)
+        if dict[peerAndThreadId] == nil {
+            dict[peerAndThreadId] = [id.messageId]
+        } else {
+            dict[peerAndThreadId]!.append(id.messageId)
+        }
+    }
+    
+    return dict
+}
+
+func messagesIdsGroupedByPeerId(_ ids: [MessageAndThreadId]) -> [PeerAndThreadId: [MessageId]] {
+    var dict: [PeerAndThreadId: [MessageId]] = [:]
+    
+    for id in ids {
+        let peerAndThreadId = PeerAndThreadId(peerId: id.messageId.peerId, threadId: id.threadId)
+        if dict[peerAndThreadId] == nil {
+            dict[peerAndThreadId] = [id.messageId]
+        } else {
+            dict[peerAndThreadId]!.append(id.messageId)
+        }
+    }
+    
+    return dict
+}
+
 func locallyRenderedMessage(message: StoreMessage, peers: [PeerId: Peer], associatedThreadInfo: Message.AssociatedThreadInfo? = nil) -> Message? {
     guard case let .Id(id) = message.id else {
         return nil
@@ -402,6 +432,14 @@ public extension Message {
     var adAttribute: AdMessageAttribute? {
         for attribute in self.attributes {
             if let attribute = attribute as? AdMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+    var inlineBotAttribute: InlineBusinessBotMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? InlineBusinessBotMessageAttribute {
                 return attribute
             }
         }

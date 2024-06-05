@@ -279,13 +279,13 @@ private func premiumSearchableItems(context: AccountContext) -> [SettingsSearcha
     var result: [SettingsSearchableItem] = []
         
     result.append(SettingsSearchableItem(id: .premium(0), title: strings.Settings_Premium, alternate: synonyms(strings.SettingsSearch_Synonyms_Premium), icon: icon, breadcrumbs: [], present: { context, _, present in
-        present(.push, PremiumIntroScreen(context: context, modal: false, source: .settings))
+        present(.push, PremiumIntroScreen(context: context, source: .settings, modal: false))
     }))
     
     let presentDemo: (PremiumDemoScreen.Subject, (SettingsSearchableItemPresentation, ViewController?) -> Void) -> Void = { subject, present in
         var replaceImpl: ((ViewController) -> Void)?
         let controller = PremiumDemoScreen(context: context, subject: subject, action: {
-            let controller = PremiumIntroScreen(context: context, modal: false, source: .settings)
+            let controller = PremiumIntroScreen(context: context, source: .settings, modal: false)
             replaceImpl?(controller)
         })
         replaceImpl = { [weak controller] c in
@@ -595,6 +595,8 @@ private func privacySearchableItems(context: AccountContext, privacySettings: Ac
                     current = info.voiceMessages
                 case .bio:
                     current = info.bio
+                case .birthday:
+                    current = info.birthday
             }
 
             present(.push, selectivePrivacySettingsController(context: context, kind: kind, current: current, callSettings: callSettings != nil ? (info.voiceCallsP2P, callSettings!.0) : nil, voipConfiguration: callSettings?.1, callIntegrationAvailable: CallKitIntegration.isAvailable, updated: { updated, updatedCallSettings, _, _ in

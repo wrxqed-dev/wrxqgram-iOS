@@ -1,7 +1,16 @@
 #include <metal_stdlib>
 #include "EditorCommon.h"
+#include "EditorUtils.h"
 
 using namespace metal;
+
+typedef struct {
+    float2      dimensions;
+    float       roundness;
+    float       alpha;
+    float       isOpaque;
+    float       empty;
+} VideoEncodeParameters;
 
 typedef struct {
     float4 pos;
@@ -10,18 +19,12 @@ typedef struct {
 } VertexData;
 
 
-float sdfRoundedRectangle(float2 uv, float2 position, float2 size, float radius) {
-    float2 q = abs(uv - position) - size + radius;
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
-}
-
 fragment half4 dualFragmentShader(RasterizerData in [[stage_in]],
                                     texture2d<half, access::sample> texture [[texture(0)]],
-                                    constant uint2 &resolution[[buffer(0)]],
-                                    constant float &roundness[[buffer(1)]],
-                                    constant float &alpha[[buffer(2)]]
+                                    texture2d<half, access::sample> mask [[texture(1)]],
+                                    constant VideoEncodeParameters& adjustments [[buffer(0)]]
                                 ) {
-    float2 R = float2(resolution.x, resolution.y);
+    float2 R = float2(adjustments.dimensions.x, adjustments.dimensions.y);
     
     float2 uv = (in.localPos - float2(0.5, 0.5)) * 2.0;
     if (R.x > R.y) {
@@ -32,11 +35,12 @@ fragment half4 dualFragmentShader(RasterizerData in [[stage_in]],
     float aspectRatio = R.x / R.y;
     
     constexpr sampler samplr(filter::linear, mag_filter::linear, min_filter::linear);
-    half3 color = texture.sample(samplr, in.texCoord).rgb;
+    half4 color = texture.sample(samplr, in.texCoord);
+    float colorAlpha = min(1.0, adjustments.isOpaque * color.a + mask.sample(samplr, in.texCoord).r);
     
-    float t = 1.0 / resolution.y;
+    float t = 1.0 / adjustments.dimensions.y;
     float side = 1.0 * aspectRatio;
-    float distance = smoothstep(t, -t, sdfRoundedRectangle(uv, float2(0.0, 0.0), float2(side, mix(1.0, side, roundness)), side * roundness));
+    float distance = smoothstep(t, -t, sdfRoundedRectangle(uv, float2(0.0, 0.0), float2(side, mix(1.0, side, adjustments.roundness)), side * adjustments.roundness));
     
-    return mix(half4(color, 0.0), half4(color, 1.0 * alpha), distance);
+    return mix(half4(color.rgb, 0.0), half4(color.rgb, colorAlpha * adjustments.alpha), distance);
 }

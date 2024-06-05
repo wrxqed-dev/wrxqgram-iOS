@@ -32,6 +32,8 @@ import AuthorizationUI
 import ChatFolderLinkPreviewScreen
 import StoryContainerScreen
 import WallpaperGalleryScreen
+import TelegramStringFormatting
+import TextFormat
 
 private func defaultNavigationForPeerId(_ peerId: PeerId?, navigation: ChatControllerInteractionNavigateToPeer) -> ChatControllerInteractionNavigateToPeer {
     if case .default = navigation {
@@ -302,7 +304,7 @@ func openResolvedUrlImpl(
             })
             dismissInput()
         case let .share(url, text, to):
-            let continueWithPeer: (PeerId) -> Void = { peerId in
+            let continueWithPeer: (PeerId, Int64?) -> Void = { peerId, threadId in
                 let textInputState: ChatTextInputState?
                 if let text = text, !text.isEmpty {
                     if let url = url, !url.isEmpty {
@@ -320,15 +322,42 @@ func openResolvedUrlImpl(
                     textInputState = nil
                 }
                 
+                let updateControllers = { [weak navigationController] in
+                    guard let navigationController else {
+                        return
+                    }
+                    let chatController: Signal<ChatController, NoError>
+                    if let threadId {
+                        chatController = chatControllerForForumThreadImpl(context: context, peerId: peerId, threadId: threadId)
+                    } else {
+                        chatController = .single(ChatControllerImpl(context: context, chatLocation: .peer(id: peerId)))
+                    }
+                    
+                    let _ = (chatController
+                    |> deliverOnMainQueue).start(next: { [weak navigationController] chatController in
+                        guard let navigationController else {
+                            return
+                        }  
+                        var controllers = navigationController.viewControllers.filter { controller in
+                            if controller is PeerSelectionController {
+                                return false
+                            }
+                            return true
+                        }
+                        controllers.append(chatController)
+                        navigationController.setViewControllers(controllers, animated: true)
+                    })
+                }
+                
                 if let textInputState = textInputState {
-                    let _ = (ChatInterfaceState.update(engine: context.engine, peerId: peerId, threadId: nil, { currentState in
+                    let _ = (ChatInterfaceState.update(engine: context.engine, peerId: peerId, threadId: threadId, { currentState in
                         return currentState.withUpdatedComposeInputState(textInputState)
                     })
                     |> deliverOnMainQueue).startStandalone(completed: {
-                        navigationController?.pushViewController(ChatControllerImpl(context: context, chatLocation: .peer(id: peerId)))
+                        updateControllers()
                     })
                 } else {
-                    navigationController?.pushViewController(ChatControllerImpl(context: context, chatLocation: .peer(id: peerId)))
+                    updateControllers()
                 }
             }
             
@@ -344,7 +373,7 @@ func openResolvedUrlImpl(
                     |> deliverOnMainQueue).startStandalone(next: { peer in
                         if let peer = peer {
                             context.sharedContext.applicationBindings.dismissNativeController()
-                            continueWithPeer(peer.id)
+                            continueWithPeer(peer.id, nil)
                         }
                     })
                 } else {
@@ -352,7 +381,7 @@ func openResolvedUrlImpl(
                     |> deliverOnMainQueue).startStandalone(next: { peer in
                         if let peer = peer {
                             context.sharedContext.applicationBindings.dismissNativeController()
-                            continueWithPeer(peer.id)
+                            continueWithPeer(peer.id, nil)
                         }
                     })
                     /*let query = to.trimmingCharacters(in: CharacterSet(charactersIn: "0123456789").inverted)
@@ -377,13 +406,8 @@ func openResolvedUrlImpl(
                     context.sharedContext.applicationBindings.dismissNativeController()
                 } else {
                     let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled], selectForumThreads: true))
-                    controller.peerSelected = { [weak controller] peer, _ in
-                        let peerId = peer.id
-                        
-                        if let strongController = controller {
-                            strongController.dismiss()
-                            continueWithPeer(peerId)
-                        }
+                    controller.peerSelected = { peer, threadId in
+                        continueWithPeer(peer.id, threadId)
                     }
                     context.sharedContext.applicationBindings.dismissNativeController()
                     navigationController?.pushViewController(controller)
@@ -964,7 +988,15 @@ func openResolvedUrlImpl(
                             forceDark: forceDark,
                             action: { [weak navigationController] in
                                 let _ = (context.engine.payments.applyPremiumGiftCode(slug: slug)
-                                |> deliverOnMainQueue).startStandalone(completed: {
+                                |> deliverOnMainQueue).startStandalone(error: { error in
+                                    dismissImpl?()
+                                    
+                                    if case let .waitForExpiration(date) = error {
+                                        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+                                        let dateText = stringForMediumDate(timestamp: date, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat)
+                                        (navigationController?.topViewController as? ViewController)?.present(UndoOverlayController(presentationData: presentationData, content: .info(title: presentationData.strings.Premium_Gift_ApplyLink_AlreadyHasPremium_Title, text: presentationData.strings.Premium_Gift_ApplyLink_AlreadyHasPremium_Text(dateText).string, timeout: nil, customUndoText: nil), elevatedLayout: true, position: .bottom, action: { _ in return true }), in: .window(.root))
+                                    }
+                                }, completed: {
                                     dismissImpl?()
                                     
                                     let controller = PremiumIntroScreen(context: context, source: .settings, forceDark: forceDark, forceHasPremium: true)
@@ -1008,7 +1040,7 @@ func openResolvedUrlImpl(
                                         (navigationController?.topViewController as? ViewController)?.present(UndoOverlayController(presentationData: presentationData, content: .forward(savedMessages: true, text: peer.id == context.account.peerId ? presentationData.strings.GiftLink_LinkSharedToSavedMessages : presentationData.strings.GiftLink_LinkSharedToChat(peer.compactDisplayTitle).string), elevatedLayout: false, animateInAsReplacement: true, action: { _ in return false }), in: .window(.root))
                                         
                                         let _ = (enqueueMessages(account: context.account, peerId: peer.id, messages: messages)
-                                                 |> deliverOnMainQueue).startStandalone()
+                                        |> deliverOnMainQueue).startStandalone()
                                         if let peerSelectionController = peerSelectionController {
                                             peerSelectionController.dismiss()
                                         }
@@ -1026,5 +1058,20 @@ func openResolvedUrlImpl(
                     present(textAlertController(context: context, updatedPresentationData: updatedPresentationData, title: nil, text: presentationData.strings.Login_UnknownError, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), nil)
                 }
             })
+        case let .messageLink(link):
+            if let link {
+                if let navigationController = navigationController {
+                    context.sharedContext.navigateToChatController(NavigateToChatControllerParams(
+                        navigationController: navigationController,
+                        context: context,
+                        chatLocation: .peer(link.peer),
+                        updateTextInputState: ChatTextInputState(inputText: chatInputStateStringWithAppliedEntities(link.message, entities: link.entities)),
+                        activateInput: .text,
+                        keepStack: .always
+                    ))
+                }
+            } else {
+                present(textAlertController(context: context, updatedPresentationData: updatedPresentationData, title: nil, text: presentationData.strings.BusinessLink_ErrorExpired, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), nil)
+            }
     }
 }

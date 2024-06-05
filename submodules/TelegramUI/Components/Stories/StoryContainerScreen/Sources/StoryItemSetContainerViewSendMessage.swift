@@ -179,6 +179,7 @@ final class StoryItemSetContainerSendMessage {
                     self.inputPanelExternalState?.deleteBackward()
                 }
             },
+            openStickerEditor: {},
             presentController: { [weak self] c, a in
                 if let self {
                     self.view?.component?.controller()?.present(c, in: .window(.root), with: a)
@@ -273,7 +274,8 @@ final class StoryItemSetContainerSendMessage {
                 threadData: nil,
                 isGeneralThreadClosed: nil,
                 replyMessage: nil,
-                accountPeerColor: nil
+                accountPeerColor: nil,
+                businessIntro: nil
             )
             
             let heightAndOverflow = inputMediaNode.updateLayout(width: availableSize.width, leftInset: 0.0, rightInset: 0.0, bottomInset: bottomInset, standardInputHeight: deviceMetrics.standardInputHeight(inLandscape: false), inputHeight: inputHeight < 100.0 ? inputHeight - bottomContainerInset : inputHeight, maximumHeight: availableSize.height, inputPanelHeight: 0.0, transition: .immediate, interfaceState: presentationInterfaceState, layoutMetrics: metrics, deviceMetrics: deviceMetrics, isVisible: true, isExpanded: false)
@@ -755,15 +757,11 @@ final class StoryItemSetContainerSendMessage {
         let size = image.size.aspectFitted(CGSize(width: 512.0, height: 512.0))
         
         func scaleImage(_ image: UIImage, size: CGSize, boundiingSize: CGSize) -> UIImage? {
-            if #available(iOSApplicationExtension 10.0, iOS 10.0, *) {
-                let format = UIGraphicsImageRendererFormat()
-                format.scale = 1.0
-                let renderer = UIGraphicsImageRenderer(size: size, format: format)
-                return renderer.image { _ in
-                    image.draw(in: CGRect(origin: .zero, size: size))
-                }
-            } else {
-                return TGScaleImageToPixelSize(image, size)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1.0
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            return renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
             }
         }
 
@@ -1889,7 +1887,9 @@ final class StoryItemSetContainerSendMessage {
             guard let self, let view else {
                 return
             }
-            self.openCamera(view: view, peer: peer, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, cameraView: cameraView)
+            if let cameraView = cameraView as? TGAttachmentCameraView {
+                self.openCamera(view: view, peer: peer, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, cameraView: cameraView)
+            }
         }
         controller.presentWebSearch = { [weak self, weak view, weak controller] mediaGroups, activateOnDisplay in
             guard let self, let view, let controller else {

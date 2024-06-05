@@ -1004,7 +1004,7 @@ private final class DemoSheetContent: CombinedComponent {
                                     position: .top,
                                     model: .island,
                                     videoFile: configuration.videos["last_seen"],
-                                    decoration: .tag
+                                    decoration: .badgeStars
                                 )),
                                 title: strings.Premium_LastSeen,
                                 text: strings.Premium_LastSeenInfo,
@@ -1023,10 +1023,30 @@ private final class DemoSheetContent: CombinedComponent {
                                     position: .top,
                                     model: .island,
                                     videoFile: configuration.videos["message_privacy"],
-                                    decoration: .tag
+                                    decoration: .swirlStars
                                 )),
                                 title: strings.Premium_MessagePrivacy,
                                 text: strings.Premium_MessagePrivacyInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
+                
+                availableItems[.folderTags] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.folderTags,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["folder_tags"],
+                                    decoration: .tag
+                                )),
+                                title: strings.Premium_FolderTags,
+                                text: strings.Premium_FolderTagsStandaloneInfo,
                                 textColor: textColor
                             )
                         )
@@ -1087,6 +1107,77 @@ private final class DemoSheetContent: CombinedComponent {
             )
                          
             var measuredTextHeight: CGFloat?
+            var text: String
+            switch component.subject {
+            case .moreUpload:
+                text = strings.Premium_UploadSizeInfo
+            case .fasterDownload:
+                text = strings.Premium_FasterSpeedStandaloneInfo
+            case .voiceToText:
+                text = strings.Premium_VoiceToTextStandaloneInfo
+            case .noAds:
+                text = strings.Premium_NoAdsStandaloneInfo
+            case .uniqueReactions:
+                text = strings.Premium_InfiniteReactionsInfo
+            case .premiumStickers:
+                text = strings.Premium_StickersInfo
+            case .emojiStatus:
+                text = strings.Premium_EmojiStatusInfo
+            case .advancedChatManagement:
+                text = strings.Premium_ChatManagementStandaloneInfo
+            case .profileBadge:
+                text = strings.Premium_BadgeInfo
+            case .animatedUserpics:
+                text = strings.Premium_AvatarInfo
+            case .appIcons:
+                text = strings.Premium_AppIconStandaloneInfo
+            case .animatedEmoji:
+                text = strings.Premium_AnimatedEmojiStandaloneInfo
+            case .translation:
+                text = strings.Premium_TranslationStandaloneInfo
+            case .colors:
+                text = strings.Premium_ColorsInfo
+            case .wallpapers:
+                text = strings.Premium_WallpapersInfo
+            case .messageTags:
+                text = strings.Premium_MessageTagsInfo
+            case .lastSeen:
+                text = strings.Premium_LastSeenInfo
+            case .messagePrivacy:
+                text = strings.Premium_MessagePrivacyInfo
+            case .folderTags:
+                text = strings.Premium_FolderTagsStandaloneInfo
+            default:
+                text = ""
+            }
+        
+            let textSideInset: CGFloat = 24.0
+            
+            let textColor = UIColor.black
+            let textFont = Font.regular(17.0)
+            let boldTextFont = Font.semibold(17.0)
+            let markdownAttributes = MarkdownAttributes(
+                body: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
+                link: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                linkAttribute: { _ in
+                    return nil
+                }
+            )
+            let measureText = measureText.update(
+                component: MultilineTextComponent(
+                    text: .markdown(text: text, attributes: markdownAttributes),
+                    horizontalAlignment: .center,
+                    maximumNumberOfLines: 0,
+                    lineSpacing: 0.0
+                ),
+                availableSize: CGSize(width: context.availableSize.width - textSideInset * 2.0, height: context.availableSize.height),
+                transition: .immediate
+            )
+            context.add(measureText
+                .position(CGPoint(x: 0.0, y: 1000.0))
+            )
+            measuredTextHeight = measureText.size.height
             
             let buttonText: String
             var buttonAnimationName: String?
@@ -1099,7 +1190,6 @@ private final class DemoSheetContent: CombinedComponent {
                 case let .gift(price):
                     buttonText = strings.Premium_Gift_GiftSubscription(price ?? "–").string
                 case .other:
-                    var text: String
                     switch component.subject {
                         case .fasterDownload:
                             buttonText = strings.Premium_FasterSpeed_Proceed
@@ -1136,78 +1226,11 @@ private final class DemoSheetContent: CombinedComponent {
                             buttonText = strings.Premium_LastSeen_Proceed
                         case .messagePrivacy:
                             buttonText = strings.Premium_MessagePrivacy_Proceed
+                        case .folderTags:
+                            buttonText = strings.Premium_FolderTags_Proceed
                         default:
                             buttonText = strings.Common_OK
                     }
-                    
-                    switch component.subject {
-                    case .moreUpload:
-                        text = strings.Premium_UploadSizeInfo
-                    case .fasterDownload:
-                        text = strings.Premium_FasterSpeedStandaloneInfo
-                    case .voiceToText:
-                        text = strings.Premium_VoiceToTextStandaloneInfo
-                    case .noAds:
-                        text = strings.Premium_NoAdsStandaloneInfo
-                    case .uniqueReactions:
-                        text = strings.Premium_InfiniteReactionsInfo
-                    case .premiumStickers:
-                        text = strings.Premium_StickersInfo
-                    case .emojiStatus:
-                        text = strings.Premium_EmojiStatusInfo
-                    case .advancedChatManagement:
-                        text = strings.Premium_ChatManagementStandaloneInfo
-                    case .profileBadge:
-                        text = strings.Premium_BadgeInfo
-                    case .animatedUserpics:
-                        text = strings.Premium_AvatarInfo
-                    case .appIcons:
-                        text = strings.Premium_AppIconStandaloneInfo
-                    case .animatedEmoji:
-                        text = strings.Premium_AnimatedEmojiStandaloneInfo
-                    case .translation:
-                        text = strings.Premium_TranslationStandaloneInfo
-                    case .colors:
-                        text = strings.Premium_ColorsInfo
-                    case .wallpapers:
-                        text = strings.Premium_WallpapersInfo
-                    case .messageTags:
-                        text = strings.Premium_MessageTagsInfo
-                    case .lastSeen:
-                        text = strings.Premium_LastSeenInfo
-                    case .messagePrivacy:
-                        text = strings.Premium_MessagePrivacyInfo
-                    case .doubleLimits, .stories:
-                        text = ""
-                    }
-                
-                    let textSideInset: CGFloat = 24.0
-                    
-                    let textColor = UIColor.black
-                    let textFont = Font.regular(17.0)
-                    let boldTextFont = Font.semibold(17.0)
-                    let markdownAttributes = MarkdownAttributes(
-                        body: MarkdownAttributeSet(font: textFont, textColor: textColor),
-                        bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
-                        link: MarkdownAttributeSet(font: textFont, textColor: textColor),
-                        linkAttribute: { _ in
-                            return nil
-                        }
-                    )
-                    let measureText = measureText.update(
-                        component: MultilineTextComponent(
-                            text: .markdown(text: text, attributes: markdownAttributes),
-                            horizontalAlignment: .center,
-                            maximumNumberOfLines: 0,
-                            lineSpacing: 0.0
-                        ),
-                        availableSize: CGSize(width: context.availableSize.width - textSideInset * 2.0, height: context.availableSize.height),
-                        transition: .immediate
-                    )
-                    context.add(measureText
-                        .position(CGPoint(x: 0.0, y: 1000.0))
-                    )
-                    measuredTextHeight = measureText.size.height
                 }
             }
             
@@ -1391,6 +1414,17 @@ public class PremiumDemoScreen: ViewControllerComponentContainer {
         case messageTags
         case lastSeen
         case messagePrivacy
+        case business
+        case folderTags
+        
+        case businessLocation
+        case businessHours
+        case businessGreetingMessage
+        case businessQuickReplies
+        case businessAwayMessage
+        case businessChatBots
+        case businessIntro
+        case businessLinks
     }
     
     public enum Source: Equatable {

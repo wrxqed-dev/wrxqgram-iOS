@@ -78,7 +78,7 @@ public func ChangePhoneNumberController(context: AccountContext) -> ViewControll
                 }, completed: { [weak codeController] in
                     codeController?.present(OverlayStatusController(theme: presentationData.theme, type: .success), in: .window(.root))
                     
-                    let _ = dismissServerProvidedSuggestion(account: context.account, suggestion: .validatePhoneNumber).start()
+                    let _ = context.engine.notices.dismissServerProvidedSuggestion(suggestion: .validatePhoneNumber).start()
                     
                     if let navigationController = codeController?.navigationController as? NavigationController {
                         var viewControllers = navigationController.viewControllers
@@ -99,7 +99,11 @@ public func ChangePhoneNumberController(context: AccountContext) -> ViewControll
                 guard let codeController else {
                     return
                 }
-                AuthorizationSequenceController.presentDidNotGetCodeUI(controller: codeController, presentationData: context.sharedContext.currentPresentationData.with({ $0 }), number: phoneNumber)
+                let carrier = CTCarrier()
+                let mnc = carrier.mobileNetworkCode ?? "none"
+                let _ = context.engine.auth.reportMissingCode(phoneNumber: phoneNumber, phoneCodeHash: next.hash, mnc: mnc).start()
+                
+                AuthorizationSequenceController.presentDidNotGetCodeUI(controller: codeController, presentationData: context.sharedContext.currentPresentationData.with({ $0 }), phoneNumber: phoneNumber, mnc: mnc)
             }
             codeController.openFragment = { url in
                 context.sharedContext.applicationBindings.openUrl(url)
@@ -162,8 +166,26 @@ public func ChangePhoneNumberController(context: AccountContext) -> ViewControll
     }
     
     Queue.mainQueue().justDispatch {
-        controller.updateData(countryCode: AuthorizationSequenceController.defaultCountryCode(), countryName: nil, number: "")
-        controller.updateCountryCode()
+        let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId))
+        |> deliverOnMainQueue).start(next: { accountPeer in
+            guard let accountPeer, case let .user(user) = accountPeer else {
+                return
+            }
+            
+            let initialCountryCode: Int32
+            if let phone = user.phone {
+                if let (_, countryCode) = lookupCountryIdByNumber(phone, configuration: context.currentCountriesConfiguration.with { $0 }), let codeValue = Int32(countryCode.code) {
+                    initialCountryCode = codeValue
+                } else {
+                    initialCountryCode = AuthorizationSequenceController.defaultCountryCode()
+                }
+            } else {
+                initialCountryCode = AuthorizationSequenceController.defaultCountryCode()
+            }
+            controller.updateData(countryCode: initialCountryCode, countryName: nil, number: "")
+            controller.updateCountryCode()
+        })
+
     }
     
     return controller

@@ -123,7 +123,7 @@ class CaptionScrollWrapperNode: ASDisplayNode {
 
 
 
-final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScrollViewDelegate {
+final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScrollViewDelegate {
     private let context: AccountContext
     private var presentationData: PresentationData
     private var theme: PresentationTheme
@@ -638,7 +638,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     
     override func didLoad() {
         super.didLoad()
-        self.scrollNode.view.delegate = self
+        self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.scrollNode.view.showsVerticalScrollIndicator = false
         
         let backwardLongPressGestureRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(self.seekBackwardLongPress(_:)))
@@ -816,8 +816,13 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     func setMessage(_ message: Message, displayInfo: Bool = true, translateToLanguage: String? = nil, peerIsCopyProtected: Bool = false) {
         self.currentMessage = message
         
+        var displayInfo = displayInfo
+        if Namespaces.Message.allNonRegular.contains(message.id.namespace) {
+            displayInfo = false
+        }
+        
         var canDelete: Bool
-        var canShare = !message.containsSecretMedia
+        var canShare = !message.containsSecretMedia && !Namespaces.Message.allNonRegular.contains(message.id.namespace)
 
         var canFullscreen = false
         
@@ -856,6 +861,9 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 }
                 if let file = content.file, !file.isAnimated, file.isVideo {
                     canFullscreen = true
+                }
+                if content.type == "photo", let _ = content.image {
+                    canEdit = true
                 }
             }
         }

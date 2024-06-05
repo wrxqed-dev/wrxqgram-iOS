@@ -212,10 +212,12 @@ private enum PeerNameColorScreenEntry: ItemListNodeEntry {
             return PeerNameColorItem(
                 theme: presentationData.theme,
                 colors: colors,
-                isProfile: isProfile,
+                mode: isProfile ? .profile : .name,
                 currentColor: currentColor,
                 updated: { color in
-                    arguments.updateNameColor(color)
+                    if let color {
+                        arguments.updateNameColor(color)
+                    }
                 },
                 sectionId: self.section
             )
@@ -660,6 +662,8 @@ public func PeerNameColorScreen(
                 })
             },
             clearGroup: { _ in
+            },
+            editAction: { _ in
             },
             pushController: { c in
             },

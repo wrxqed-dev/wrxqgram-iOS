@@ -1184,7 +1184,7 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
             
             var hintSeekable = false
             if let contentInfo = item.contentInfo, case let .message(message) = contentInfo {
-                if Namespaces.Message.allScheduled.contains(message.id.namespace) {
+                if Namespaces.Message.allNonRegular.contains(message.id.namespace) {
                     disablePictureInPicture = true
                 } else {
                     let throttledSignal = videoNode.status
@@ -1599,7 +1599,9 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                             videoNode.setBaseRate(self.playbackRate ?? 1.0)
                         }
                     } else {
-                        if self.shouldAutoplayOnCentrality()  {
+                        if isAnimated {
+                            self.playOnContentOwnership = true
+                        } else if self.shouldAutoplayOnCentrality()  {
                             self.playOnContentOwnership = true
                         }
                     }

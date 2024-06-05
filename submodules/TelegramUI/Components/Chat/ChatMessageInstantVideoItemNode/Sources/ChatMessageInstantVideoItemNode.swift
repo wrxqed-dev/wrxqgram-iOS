@@ -34,7 +34,7 @@ private let nameFont = Font.medium(14.0)
 private let inlineBotPrefixFont = Font.regular(14.0)
 private let inlineBotNameFont = nameFont
 
-public class ChatMessageInstantVideoItemNode: ChatMessageItemView, UIGestureRecognizerDelegate {
+public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureRecognizerDelegate {
     public let contextSourceNode: ContextExtractedContentContainingNode
     public let containerNode: ContextControllerSourceNode
     public let interactiveVideoNode: ChatMessageInteractiveInstantVideoNode
@@ -99,7 +99,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, UIGestureReco
         
         self.interactiveVideoNode.shouldOpen = { [weak self] in
             if let strongSelf = self {
-                if let item = strongSelf.item, (item.message.id.namespace == Namespaces.Message.Local || item.message.id.namespace == Namespaces.Message.ScheduledLocal) {
+                if let item = strongSelf.item, (item.message.id.namespace == Namespaces.Message.Local || item.message.id.namespace == Namespaces.Message.ScheduledLocal || item.message.id.namespace == Namespaces.Message.QuickReplyLocal) {
                     return false
                 }
                 return !strongSelf.animatingHeight
@@ -321,8 +321,8 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, UIGestureReco
                         
                         if !isBroadcastChannel {
                             hasAvatar = true
-                        } else if case .feed = item.chatLocation {
-                            hasAvatar = true
+                        } else if case .customChatContents = item.chatLocation {
+                            hasAvatar = false
                         }
                     }
                 } else if incoming {
@@ -341,7 +341,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, UIGestureReco
             var needsShareButton = false
             if case .pinnedMessages = item.associatedData.subject {
                 needsShareButton = true
-            } else if isFailed || Namespaces.Message.allScheduled.contains(item.message.id.namespace) {
+            } else if isFailed || Namespaces.Message.allNonRegular.contains(item.message.id.namespace) {
                 needsShareButton = false
             }
             else if item.message.id.peerId == item.context.account.peerId {
@@ -690,7 +690,9 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, UIGestureReco
                                 }
                                 strongSelf.shareButtonNode = updatedShareButtonNode
                                 strongSelf.addSubnode(updatedShareButtonNode)
-                                updatedShareButtonNode.addTarget(strongSelf, action: #selector(strongSelf.shareButtonPressed), forControlEvents: .touchUpInside)
+                                updatedShareButtonNode.pressed = { [weak strongSelf] in
+                                    strongSelf?.shareButtonPressed()
+                                }
                             }
                             let buttonSize = updatedShareButtonNode.update(presentationData: item.presentationData, controllerInteraction: item.controllerInteraction, chatLocation: item.chatLocation, subject: item.associatedData.subject, message: item.message, account: item.context.account)
                             updatedShareButtonNode.frame = CGRect(origin: CGPoint(x: min(params.width - buttonSize.width - 8.0, videoFrame.maxX - 7.0), y: videoFrame.maxY - 24.0 - buttonSize.height), size: buttonSize)
@@ -1170,7 +1172,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, UIGestureReco
     
     override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let shareButtonNode = self.shareButtonNode, shareButtonNode.frame.contains(point) {
-            return shareButtonNode.view
+            return shareButtonNode.view.hitTest(self.view.convert(point, to: shareButtonNode.view), with: event)
         }
         if !self.bounds.contains(point) {
             return nil
