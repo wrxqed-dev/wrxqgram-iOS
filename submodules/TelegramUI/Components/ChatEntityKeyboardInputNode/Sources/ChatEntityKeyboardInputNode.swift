@@ -160,7 +160,18 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         return hasPremium
     }
     
-    public static func inputData(context: AccountContext, chatPeerId: PeerId?, areCustomEmojiEnabled: Bool, hasEdit: Bool = false, hasTrending: Bool = true, hasSearch: Bool = true, hideBackground: Bool = false, sendGif: ((FileMediaReference, UIView, CGRect, Bool, Bool) -> Bool)?) -> Signal<InputData, NoError> {
+    public static func inputData(
+        context: AccountContext,
+        chatPeerId: PeerId?,
+        areCustomEmojiEnabled: Bool,
+        hasEdit: Bool = false,
+        hasTrending: Bool = true,
+        hasSearch: Bool = true,
+        hasStickers: Bool = true,
+        hasGifs: Bool = true,
+        hideBackground: Bool = false,
+        sendGif: ((FileMediaReference, UIView, CGRect, Bool, Bool) -> Bool)?
+    ) -> Signal<InputData, NoError> {
         let animationCache = context.animationCache
         let animationRenderer = context.animationRenderer
         
@@ -184,7 +195,27 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                 
         let strings = context.sharedContext.currentPresentationData.with({ $0 }).strings
         
-        let stickerItems = EmojiPagerContentComponent.stickerInputData(context: context, animationCache: animationCache, animationRenderer: animationRenderer, stickerNamespaces: stickerNamespaces, stickerOrderedItemListCollectionIds: stickerOrderedItemListCollectionIds, chatPeerId: chatPeerId, hasSearch: hasSearch, hasTrending: hasTrending, forceHasPremium: false, hasEdit: hasEdit, hideBackground: hideBackground)
+        let stickerItems: Signal<EmojiPagerContentComponent?, NoError>
+        if hasStickers {
+            stickerItems = EmojiPagerContentComponent.stickerInputData(
+                context: context,
+                animationCache: animationCache,
+                animationRenderer: animationRenderer,
+                stickerNamespaces: stickerNamespaces,
+                stickerOrderedItemListCollectionIds: stickerOrderedItemListCollectionIds,
+                chatPeerId: chatPeerId,
+                hasSearch: hasSearch,
+                hasTrending: hasTrending,
+                forceHasPremium: false,
+                hasEdit: hasEdit,
+                hasAdd: hasEdit,
+                subject: .chatStickers,
+                hideBackground: hideBackground
+            )
+            |> map(Optional.init)
+        } else {
+            stickerItems = .single(nil)
+        }
         
         let reactions: Signal<[String], NoError> = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.App())
         |> map { appConfiguration -> [String] in
@@ -197,10 +228,13 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         }
         |> distinctUntilChanged
         
-        let animatedEmojiStickers = context.engine.stickers.loadedStickerPack(reference: .animatedEmoji, forceActualized: false)
-        |> map { animatedEmoji -> [String: [StickerPackItem]] in
-            var animatedEmojiStickers: [String: [StickerPackItem]] = [:]
-            switch animatedEmoji {
+        let animatedEmojiStickers: Signal<[String: [StickerPackItem]], NoError>
+        
+        if hasGifs {
+            animatedEmojiStickers = context.engine.stickers.loadedStickerPack(reference: .animatedEmoji, forceActualized: false)
+            |> map { animatedEmoji -> [String: [StickerPackItem]] in
+                var animatedEmojiStickers: [String: [StickerPackItem]] = [:]
+                switch animatedEmoji {
                 case let .result(_, items, _):
                     for item in items {
                         if let emoji = item.getStringRepresentationsOfIndexKeys().first {
@@ -213,8 +247,11 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                     }
                 default:
                     break
+                }
+                return animatedEmojiStickers
             }
-            return animatedEmojiStickers
+        } else {
+            animatedEmojiStickers = .single([:])
         }
         
         let gifInputInteraction = GifPagerContentComponent.InputInteraction(
@@ -236,22 +273,27 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         )
         
         // We are going to subscribe to the actual data when the view is loaded
-        let gifItems: Signal<EntityKeyboardGifContent, NoError> = .single(EntityKeyboardGifContent(
-            hasRecentGifs: true,
-            component: GifPagerContentComponent(
-                context: context,
-                inputInteraction: gifInputInteraction,
-                subject: .recent,
-                items: [],
-                isLoading: false,
-                loadMoreToken: nil,
-                displaySearchWithPlaceholder: nil,
-                searchCategories: nil,
-                searchInitiallyHidden: true,
-                searchState: .empty(hasResults: false),
-                hideBackground: hideBackground
-            )
-        ))
+        let gifItems: Signal<EntityKeyboardGifContent?, NoError>
+        if hasGifs {
+            gifItems = .single(EntityKeyboardGifContent(
+                hasRecentGifs: true,
+                component: GifPagerContentComponent(
+                    context: context,
+                    inputInteraction: gifInputInteraction,
+                    subject: .recent,
+                    items: [],
+                    isLoading: false,
+                    loadMoreToken: nil,
+                    displaySearchWithPlaceholder: nil,
+                    searchCategories: nil,
+                    searchInitiallyHidden: true,
+                    searchState: .empty(hasResults: false),
+                    hideBackground: hideBackground
+                )
+            ))
+        } else {
+            gifItems = .single(nil)
+        }
         
         return combineLatest(queue: .mainQueue(),
             emojiItems,
@@ -317,6 +359,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
     private var inputDataDisposable: Disposable?
     private var hasRecentGifsDisposable: Disposable?
     private let opaqueTopPanelBackground: Bool
+    private let useOpaqueTheme: Bool
     
     private struct EmojiSearchResult {
         var groups: [EmojiPagerContentComponent.ItemGroup]
@@ -376,7 +419,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
     private var currentState: (width: CGFloat, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, standardInputHeight: CGFloat, inputHeight: CGFloat, maximumHeight: CGFloat, inputPanelHeight: CGFloat, interfaceState: ChatPresentationInterfaceState, layoutMetrics: LayoutMetrics, deviceMetrics: DeviceMetrics, isVisible: Bool, isExpanded: Bool)?
     
     private var scheduledContentAnimationHint: EmojiPagerContentComponent.ContentAnimation?
-    private var scheduledInnerTransition: Transition?
+    private var scheduledInnerTransition: ComponentTransition?
     
     private var gifMode: GifPagerContentComponent.Subject? {
         didSet {
@@ -423,11 +466,12 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         |> distinctUntilChanged
     }
     
-    public init(context: AccountContext, currentInputData: InputData, updatedInputData: Signal<InputData, NoError>, defaultToEmojiTab: Bool, opaqueTopPanelBackground: Bool = false, interaction: ChatEntityKeyboardInputNode.Interaction?, chatPeerId: PeerId?, stateContext: StateContext?) {
+    public init(context: AccountContext, currentInputData: InputData, updatedInputData: Signal<InputData, NoError>, defaultToEmojiTab: Bool, opaqueTopPanelBackground: Bool = false, useOpaqueTheme: Bool = false, interaction: ChatEntityKeyboardInputNode.Interaction?, chatPeerId: PeerId?, stateContext: StateContext?) {
         self.context = context
         self.currentInputData = currentInputData
         self.defaultToEmojiTab = defaultToEmojiTab
         self.opaqueTopPanelBackground = opaqueTopPanelBackground
+        self.useOpaqueTheme = useOpaqueTheme
         self.stateContext = stateContext
         
         self.interaction = interaction
@@ -654,7 +698,10 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                             let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                             
                             premiumToastCounter += 1
-                            let suggestSavedMessages = premiumToastCounter % 2 == 0
+                            var suggestSavedMessages = premiumToastCounter % 2 == 0
+                            if chatPeerId == nil {
+                                suggestSavedMessages = false
+                            }
                             let text: String
                             let actionTitle: String
                             if suggestSavedMessages {
@@ -1048,7 +1095,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                         }))
                     }
                 case let .category(value):
-                    let resultSignal = self.context.engine.stickers.searchEmoji(emojiString: value)
+                    let resultSignal = self.context.engine.stickers.searchEmoji(category: value)
                     |> mapToSignal { files, isFinalResult -> Signal<(items: [EmojiPagerContentComponent.ItemGroup], isFinalResult: Bool), NoError> in
                         var items: [EmojiPagerContentComponent.Item] = []
                         
@@ -1062,7 +1109,8 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                             let item = EmojiPagerContentComponent.Item(
                                 animationData: animationData,
                                 content: .animation(animationData),
-                                itemFile: itemFile, subgroupId: nil,
+                                itemFile: itemFile,
+                                subgroupId: nil,
                                 icon: .none,
                                 tintMode: animationData.isTemplate ? .primary : .none
                             )
@@ -1119,10 +1167,10 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                                     fillWithLoadingPlaceholders: true,
                                     items: []
                                 )
-                            ], id: AnyHashable(value), version: version, isPreset: true), isSearching: false)
+                            ], id: AnyHashable(value.id), version: version, isPreset: true), isSearching: false)
                             return
                         }
-                        self.emojiSearchStateValue = EmojiSearchState(result: EmojiSearchResult(groups: result.items, id: AnyHashable(value), version: version, isPreset: true), isSearching: false)
+                        self.emojiSearchStateValue = EmojiSearchState(result: EmojiSearchResult(groups: result.items, id: AnyHashable(value.id), version: version, isPreset: true), isSearching: false)
                         version += 1
                     }))
                 }
@@ -1136,7 +1184,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
             externalBackground: nil,
             externalExpansionView: nil,
             customContentView: nil,
-            useOpaqueTheme: false,
+            useOpaqueTheme: self.useOpaqueTheme,
             hideBackground: false,
             stateContext: self.stateContext?.emojiState,
             addImage: nil
@@ -1350,7 +1398,8 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                         parentNavigationController: interaction.getNavigationController(),
                         sendSticker: { [weak interaction] fileReference, sourceView, sourceRect in
                             return interaction?.sendSticker(fileReference, false, false, nil, false, sourceView, sourceRect, nil, []) ?? false
-                        }
+                        },
+                        actionPerformed: nil
                     )
                     interaction.presentController(controller, nil)
                 })
@@ -1391,7 +1440,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                     strongSelf.stickerSearchDisposable.set(nil)
                     strongSelf.stickerSearchStateValue = EmojiSearchState(result: nil, isSearching: false)
                 case let .category(value):
-                    let resultSignal = strongSelf.context.engine.stickers.searchStickers(query: value, scope: [.installed, .remote])
+                    let resultSignal = strongSelf.context.engine.stickers.searchStickers(category: value, scope: [.installed, .remote])
                     |> mapToSignal { files -> Signal<(items: [EmojiPagerContentComponent.ItemGroup], isFinalResult: Bool), NoError> in
                         var items: [EmojiPagerContentComponent.Item] = []
                         
@@ -1463,10 +1512,10 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                                     fillWithLoadingPlaceholders: true,
                                     items: []
                                 )
-                            ], id: AnyHashable(value), version: version, isPreset: true), isSearching: false)
+                            ], id: AnyHashable(value.id), version: version, isPreset: true), isSearching: false)
                             return
                         }
-                        strongSelf.stickerSearchStateValue = EmojiSearchState(result: EmojiSearchResult(groups: result.items, id: AnyHashable(value), version: version, isPreset: true), isSearching: false)
+                        strongSelf.stickerSearchStateValue = EmojiSearchState(result: EmojiSearchResult(groups: result.items, id: AnyHashable(value.id), version: version, isPreset: true), isSearching: false)
                         version += 1
                     }))
                 }
@@ -1480,7 +1529,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
             externalBackground: nil,
             externalExpansionView: nil,
             customContentView: nil,
-            useOpaqueTheme: false,
+            useOpaqueTheme: self.useOpaqueTheme,
             hideBackground: false,
             stateContext: nil,
             addImage: nil
@@ -1537,7 +1586,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                 }
             }
             
-            var transition: Transition = .immediate
+            var transition: ComponentTransition = .immediate
             var useAnimation = false
             
             if let pagerView = strongSelf.entityKeyboardView.componentView as? EntityKeyboardComponent.View, let centralId = pagerView.centralId {
@@ -1556,7 +1605,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                 } else {
                     contentAnimation = EmojiPagerContentComponent.ContentAnimation(type: .generic)
                 }
-                transition = Transition(animation: .curve(duration: 0.4, curve: .spring)).withUserData(contentAnimation)
+                transition = ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)).withUserData(contentAnimation)
             }
             strongSelf.currentInputData = strongSelf.processInputData(inputData: inputData)
             strongSelf.performLayout(transition: transition)
@@ -1692,7 +1741,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         self.isMarkInputCollapsed = true
     }
     
-    private func performLayout(transition: Transition) {
+    private func performLayout(transition: ComponentTransition) {
         guard let (width, leftInset, rightInset, bottomInset, standardInputHeight, inputHeight, maximumHeight, inputPanelHeight, interfaceState, layoutMetrics, deviceMetrics, isVisible, isExpanded) = self.currentState else {
             return
         }
@@ -1710,12 +1759,12 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
     public override func updateLayout(width: CGFloat, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, standardInputHeight: CGFloat, inputHeight: CGFloat, maximumHeight: CGFloat, inputPanelHeight: CGFloat, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState, layoutMetrics: LayoutMetrics, deviceMetrics: DeviceMetrics, isVisible: Bool, isExpanded: Bool) -> (CGFloat, CGFloat) {
         self.currentState = (width, leftInset, rightInset, bottomInset, standardInputHeight, inputHeight, maximumHeight, inputPanelHeight, interfaceState, layoutMetrics, deviceMetrics, isVisible, isExpanded)
         
-        let innerTransition: Transition
+        let innerTransition: ComponentTransition
         if let scheduledInnerTransition = self.scheduledInnerTransition {
             self.scheduledInnerTransition = nil
             innerTransition = scheduledInnerTransition
         } else {
-            innerTransition = Transition(transition)
+            innerTransition = ComponentTransition(transition)
         }
         
         let wasMarkedInputCollapsed = self.isMarkInputCollapsed
@@ -1778,6 +1827,8 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         if case let .customChatContents(customChatContents) = interfaceState.subject {
             switch customChatContents.kind {
             case .quickReplyMessageInput:
+                break
+            case .hashTagSearch:
                 break
             case .businessLinkSetup:
                 stickerContent = nil
@@ -2042,7 +2093,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
             guard let strongSelf = self else {
                 return
             }
-            strongSelf.performLayout(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+            strongSelf.performLayout(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
         })
         
         if self.context.sharedContext.currentStickerSettings.with({ $0 }).dynamicPackOrder {
@@ -2078,7 +2129,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
             
             let message = Message(stableId: 0, stableVersion: 0, id: MessageId(peerId: PeerId(0), namespace: Namespaces.Message.Local, id: 0), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: 0, flags: [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: nil, text: "", attributes: [], media: [file.media], peers: SimpleDictionary(), associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
             
-            let gallery = GalleryController(context: strongSelf.context, source: .standaloneMessage(message), streamSingleVideo: true, replaceRootController: { _, _ in
+            let gallery = GalleryController(context: strongSelf.context, source: .standaloneMessage(message, nil), streamSingleVideo: true, replaceRootController: { _, _ in
             }, baseNavigationController: nil)
             gallery.setHintWillBePresentedInPreviewingContext(true)
             
@@ -2833,7 +2884,7 @@ public final class EmojiContentPeekBehaviorImpl: EmojiContentPeekBehavior {
                                                 let controller = strongSelf.context.sharedContext.makeStickerPackScreen(context: context, updatedPresentationData: nil, mainStickerPack: packReference, stickerPacks: [packReference], loadedStickerPacks: [], isEditing: false, expandIfNeeded: false, parentNavigationController: interaction.navigationController(), sendSticker: { file, sourceView, sourceRect in
                                                     sendSticker(file, false, false, nil, false, sourceView, sourceRect, nil)
                                                     return true
-                                                })
+                                                }, actionPerformed: nil)
                                                 
                                                 interaction.navigationController()?.view.window?.endEditing(true)
                                                 interaction.presentController(controller, nil)

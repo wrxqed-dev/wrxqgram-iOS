@@ -242,9 +242,9 @@ private final class BoostsTabsItemNode: ListViewItemNode {
                     
                     switch item.selectedTab {
                     case .boosts:
-                        selectionFrame = CGRect(x: strongSelf.boostsTextNode.frame.minX, y: layoutSize.height - selectionHeight, width: strongSelf.boostsTextNode.frame.width, height: selectionHeight)
+                        selectionFrame = CGRect(x: strongSelf.boostsTextNode.frame.minX, y: contentSize.height - selectionHeight, width: strongSelf.boostsTextNode.frame.width, height: selectionHeight)
                     case .gifts:
-                        selectionFrame = CGRect(x: strongSelf.giftsTextNode.frame.minX, y: layoutSize.height - selectionHeight, width: strongSelf.giftsTextNode.frame.width, height: selectionHeight)
+                        selectionFrame = CGRect(x: strongSelf.giftsTextNode.frame.minX, y: contentSize.height - selectionHeight, width: strongSelf.giftsTextNode.frame.width, height: selectionHeight)
                     }
                     
                     var transition: ContainedViewLayoutTransition = .immediate
@@ -257,7 +257,7 @@ private final class BoostsTabsItemNode: ListViewItemNode {
         }
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

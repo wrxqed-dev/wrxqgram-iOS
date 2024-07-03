@@ -17,6 +17,7 @@ import AccountContext
 import LegacyComponents
 import AudioBlob
 import PeerInfoAvatarListNode
+import VoiceChatActionButton
 
 private let avatarFont = avatarPlaceholderFont(size: floor(50.0 * 16.0 / 37.0))
 private let tileSize = CGSize(width: 84.0, height: 84.0)
@@ -1009,7 +1010,7 @@ class VoiceChatFullscreenParticipantItemNode: ItemListRevealOptionsItemNode {
         self.updateIsHighlighted(transition: (animated && !highlighted) ? .animated(duration: 0.3, curve: .easeInOut) : .immediate)
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

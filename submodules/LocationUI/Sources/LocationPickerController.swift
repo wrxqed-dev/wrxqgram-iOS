@@ -18,7 +18,7 @@ public enum LocationPickerMode {
 }
 
 class LocationPickerInteraction {
-    let sendLocation: (CLLocationCoordinate2D, String?, String?) -> Void
+    let sendLocation: (CLLocationCoordinate2D, String?, MapGeoAddress?) -> Void
     let sendLiveLocation: (CLLocationCoordinate2D) -> Void
     let sendVenue: (TelegramMediaMap, Int64?, String?) -> Void
     let toggleMapModeSelection: () -> Void
@@ -33,7 +33,7 @@ class LocationPickerInteraction {
     let openHomeWorkInfo: () -> Void
     let showPlacesInThisArea: () -> Void
     
-    init(sendLocation: @escaping (CLLocationCoordinate2D, String?, String?) -> Void, sendLiveLocation: @escaping (CLLocationCoordinate2D) -> Void, sendVenue: @escaping (TelegramMediaMap, Int64?, String?) -> Void, toggleMapModeSelection: @escaping () -> Void, updateMapMode: @escaping (LocationMapMode) -> Void, goToUserLocation: @escaping () -> Void, goToCoordinate: @escaping (CLLocationCoordinate2D) -> Void, openSearch: @escaping () -> Void, updateSearchQuery: @escaping (String) -> Void, dismissSearch: @escaping () -> Void, dismissInput: @escaping () -> Void, updateSendActionHighlight: @escaping (Bool) -> Void, openHomeWorkInfo: @escaping () -> Void, showPlacesInThisArea: @escaping ()-> Void) {
+    init(sendLocation: @escaping (CLLocationCoordinate2D, String?, MapGeoAddress?) -> Void, sendLiveLocation: @escaping (CLLocationCoordinate2D) -> Void, sendVenue: @escaping (TelegramMediaMap, Int64?, String?) -> Void, toggleMapModeSelection: @escaping () -> Void, updateMapMode: @escaping (LocationMapMode) -> Void, goToUserLocation: @escaping () -> Void, goToCoordinate: @escaping (CLLocationCoordinate2D) -> Void, openSearch: @escaping () -> Void, updateSearchQuery: @escaping (String) -> Void, dismissSearch: @escaping () -> Void, dismissInput: @escaping () -> Void, updateSendActionHighlight: @escaping (Bool) -> Void, openHomeWorkInfo: @escaping () -> Void, showPlacesInThisArea: @escaping ()-> Void) {
         self.sendLocation = sendLocation
         self.sendLiveLocation = sendLiveLocation
         self.sendVenue = sendVenue
@@ -80,7 +80,11 @@ public final class LocationPickerController: ViewController, AttachmentContainab
     
     public var requestAttachmentMenuExpansion: () -> Void = {}
     public var updateNavigationStack: (@escaping ([AttachmentContainable]) -> ([AttachmentContainable], AttachmentMediaPickerContext?)) -> Void = { _ in }
+    public var parentController: () -> ViewController? = {
+        return nil
+    }
     public var updateTabBarAlpha: (CGFloat, ContainedViewLayoutTransition) -> Void = { _, _ in }
+    public var updateTabBarVisibility: (Bool, ContainedViewLayoutTransition) -> Void = { _, _ in }
     public var cancelPanGesture: () -> Void = { }
     public var isContainerPanning: () -> Bool = { return false }
     public var isContainerExpanded: () -> Bool = { return false }
@@ -118,16 +122,27 @@ public final class LocationPickerController: ViewController, AttachmentContainab
                 strongSelf.controllerNode.updatePresentationData(presentationData)
             }
         })
-        
-        let locationWithTimeout: (CLLocationCoordinate2D, Int32?) -> TelegramMediaMap = { coordinate, timeout in
-            return TelegramMediaMap(latitude: coordinate.latitude, longitude: coordinate.longitude, heading: nil, accuracyRadius: nil, geoPlace: nil, venue: nil, liveBroadcastingTimeout: timeout, liveProximityNotificationRadius: nil)
-        }
-                
-        self.interaction = LocationPickerInteraction(sendLocation: { [weak self] coordinate, name, countryCode in
+                        
+        self.interaction = LocationPickerInteraction(sendLocation: { [weak self] coordinate, name, geoAddress in
             guard let strongSelf = self else {
                 return
             }
-            strongSelf.completion(locationWithTimeout(coordinate, nil), nil, nil, name, countryCode)
+            strongSelf.completion(
+                TelegramMediaMap(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    heading: nil,
+                    accuracyRadius: nil,
+                    venue: nil,
+                    address: geoAddress,
+                    liveBroadcastingTimeout: nil,
+                    liveProximityNotificationRadius: nil
+                ),
+                nil,
+                nil,
+                name,
+                geoAddress?.country
+            )
             strongSelf.dismiss()
         }, sendLiveLocation: { [weak self] coordinate in
             guard let strongSelf = self else {
@@ -142,33 +157,34 @@ public final class LocationPickerController: ViewController, AttachmentContainab
                     return
                 }
                 let controller = ActionSheetController(presentationData: strongSelf.presentationData)
-                var title = strongSelf.presentationData.strings.Map_LiveLocationGroupDescription
+                var title = strongSelf.presentationData.strings.Map_LiveLocationGroupNewDescription
                 if case let .share(peer, _, _) = strongSelf.mode, let peer = peer, case .user = peer {
-                    title = strongSelf.presentationData.strings.Map_LiveLocationPrivateDescription(peer.compactDisplayTitle).string
+                    title = strongSelf.presentationData.strings.Map_LiveLocationPrivateNewDescription(peer.compactDisplayTitle).string
                 }
+                
+                let sendLiveLocationImpl: (Int32) -> Void = { [weak self, weak controller] period in
+                    controller?.dismissAnimated()
+                    guard let self, let controller else {
+                        return
+                    }
+                    controller.dismissAnimated()
+                    self.completion(TelegramMediaMap(coordinate: coordinate, liveBroadcastingTimeout: period), nil, nil, nil, nil)
+                    self.dismiss()
+                }
+                
                 controller.setItemGroups([
                     ActionSheetItemGroup(items: [
-                        ActionSheetTextItem(title: title),
-                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationFor15Minutes, color: .accent, action: { [weak self, weak controller] in
-                            controller?.dismissAnimated()
-                            if let strongSelf = self {
-                                strongSelf.completion(TelegramMediaMap(coordinate: coordinate, liveBroadcastingTimeout: 15 * 60), nil, nil, nil, nil)
-                                strongSelf.dismiss()
-                            }
+                        ActionSheetTextItem(title: title, font: .large, parseMarkdown: true),
+                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationForMinutes(15), color: .accent, action: { sendLiveLocationImpl(15 * 60)
                         }),
-                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationFor1Hour, color: .accent, action: { [weak self, weak controller] in
-                            controller?.dismissAnimated()
-                            if let strongSelf = self {
-                                strongSelf.completion(TelegramMediaMap(coordinate: coordinate, liveBroadcastingTimeout: 60 * 60 - 1), nil, nil, nil, nil)
-                                strongSelf.dismiss()
-                            }
+                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationForHours(1), color: .accent, action: {
+                            sendLiveLocationImpl(60 * 60 - 1)
                         }),
-                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationFor8Hours, color: .accent, action: { [weak self, weak controller] in
-                            controller?.dismissAnimated()
-                            if let strongSelf = self {
-                                strongSelf.completion(TelegramMediaMap(coordinate: coordinate, liveBroadcastingTimeout: 8 * 60 * 60), nil, nil, nil, nil)
-                                strongSelf.dismiss()
-                            }
+                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationForHours(8), color: .accent, action: {
+                            sendLiveLocationImpl(8 * 60 * 60)
+                        }),
+                        ActionSheetButtonItem(title: strongSelf.presentationData.strings.Map_LiveLocationIndefinite, color: .accent, action: {
+                            sendLiveLocationImpl(liveLocationIndefinitePeriod)
                         })
                     ]),
                     ActionSheetItemGroup(items: [
@@ -185,7 +201,7 @@ public final class LocationPickerController: ViewController, AttachmentContainab
             }
             let venueType = venue.venue?.type ?? ""
             if ["home", "work"].contains(venueType) {
-                completion(TelegramMediaMap(latitude: venue.latitude, longitude: venue.longitude, heading: nil, accuracyRadius: nil, geoPlace: nil, venue: nil, liveBroadcastingTimeout: nil, liveProximityNotificationRadius: nil), nil, nil, nil, nil)
+                completion(TelegramMediaMap(latitude: venue.latitude, longitude: venue.longitude, heading: nil, accuracyRadius: nil, venue: nil, liveBroadcastingTimeout: nil, liveProximityNotificationRadius: nil), nil, nil, nil, nil)
             } else {
                 completion(venue, queryId, resultId, venue.venue?.address, nil)
             }
@@ -388,6 +404,17 @@ private final class LocationPickerContext: AttachmentMediaPickerContext {
         return .single(nil)
     }
     
+    var hasCaption: Bool {
+        return false
+    }
+    
+    var captionIsAboveMedia: Signal<Bool, NoError> {
+        return .single(false)
+    }
+    
+    func setCaptionIsAboveMedia(_ captionIsAboveMedia: Bool) -> Void {
+    }
+    
     public var loadingProgress: Signal<CGFloat?, NoError> {
         return .single(nil)
     }
@@ -399,10 +426,10 @@ private final class LocationPickerContext: AttachmentMediaPickerContext {
     func setCaption(_ caption: NSAttributedString) {
     }
     
-    func send(mode: AttachmentMediaPickerSendMode, attachmentMode: AttachmentMediaPickerAttachmentMode) {
+    func send(mode: AttachmentMediaPickerSendMode, attachmentMode: AttachmentMediaPickerAttachmentMode, parameters: ChatSendMessageActionSheetController.SendParameters?) {
     }
     
-    func schedule() {
+    func schedule(parameters: ChatSendMessageActionSheetController.SendParameters?) {
     }
     
     func mainButtonAction() {

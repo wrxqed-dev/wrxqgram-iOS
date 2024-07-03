@@ -561,10 +561,10 @@ public extension TelegramEngine {
             return _internal_removePeerChat(account: self.account, peerId: peerId, reportChatSpam: reportChatSpam, deleteGloballyIfPossible: deleteGloballyIfPossible)
         }
 
-        public func removePeerChats(peerIds: [PeerId]) -> Signal<Never, NoError> {
+        public func removePeerChats(peerIds: [PeerId], deleteGloballyIfPossible: Bool = false) -> Signal<Never, NoError> {
             return self.account.postbox.transaction { transaction -> Void in
                 for peerId in peerIds {
-                    _internal_removePeerChat(account: self.account, transaction: transaction, mediaBox: self.account.postbox.mediaBox, peerId: peerId, reportChatSpam: false, deleteGloballyIfPossible: peerId.namespace == Namespaces.Peer.SecretChat)
+                    _internal_removePeerChat(account: self.account, transaction: transaction, mediaBox: self.account.postbox.mediaBox, peerId: peerId, reportChatSpam: false, deleteGloballyIfPossible: peerId.namespace == Namespaces.Peer.SecretChat || deleteGloballyIfPossible)
                 }
             }
             |> ignoreValues
@@ -823,6 +823,18 @@ public extension TelegramEngine {
             return _internal_requestChannelRevenueWithdrawalUrl(account: self.account, peerId: peerId, password: password)
         }
         
+        public func checkStarsRevenueWithdrawalAvailability() -> Signal<Never, RequestStarsRevenueWithdrawalError> {
+            return _internal_checkStarsRevenueWithdrawalAvailability(account: self.account)
+        }
+        
+        public func requestStarsRevenueWithdrawalUrl(peerId: EnginePeer.Id, amount: Int64, password: String) -> Signal<String, RequestStarsRevenueWithdrawalError> {
+            return _internal_requestStarsRevenueWithdrawalUrl(account: self.account, peerId: peerId, amount: amount, password: password)
+        }
+        
+        public func requestStarsRevenueAdsAccountlUrl(peerId: EnginePeer.Id) -> Signal<String?, NoError> {
+            return _internal_requestStarsRevenueAdsAccountlUrl(account: self.account, peerId: peerId)
+        }
+        
         public func getChatListPeers(filterPredicate: ChatListFilterPredicate) -> Signal<[EnginePeer], NoError> {
             return self.account.postbox.transaction { transaction -> [EnginePeer] in
                 return transaction.getChatListPeers(groupId: .root, filterPredicate: filterPredicate, additionalFilter: nil).map(EnginePeer.init)
@@ -934,6 +946,32 @@ public extension TelegramEngine {
                 let delayTime = CFAbsoluteTimeGetCurrent() - startTime
                 if delayTime > 0.3 {
                     //Logger.shared.log("getNextUnreadChannel", "took \(delayTime) s")
+                }
+            }
+        }
+        
+        public func getNextUnreadForumTopic(peerId: PeerId, topicId: Int32) -> Signal<(id: Int64, data: MessageHistoryThreadData)?, NoError> {
+            return self.account.postbox.transaction { transaction -> (id: Int64, data: MessageHistoryThreadData)? in
+                var unreadThreads: [(id: Int64, data: MessageHistoryThreadData, index: MessageIndex)] = []
+                for item in transaction.getMessageHistoryThreadIndex(peerId: peerId, limit: 100) {
+                    if item.threadId == Int64(topicId) {
+                        continue
+                    }
+                    guard let data = item.info.data.get(MessageHistoryThreadData.self) else {
+                        continue
+                    }
+                    if data.incomingUnreadCount <= 0 {
+                        continue
+                    }
+                    guard let messageIndex = transaction.getMessageHistoryThreadTopMessage(peerId: peerId, threadId: item.threadId, namespaces: Set([Namespaces.Message.Cloud])) else {
+                        continue
+                    }
+                    unreadThreads.append((item.threadId, data, messageIndex))
+                }
+                if let result = unreadThreads.min(by: { $0.index > $1.index }) {
+                    return (result.id, result.data)
+                } else {
+                    return nil
                 }
             }
         }
@@ -1449,7 +1487,7 @@ public extension TelegramEngine {
                     return .single(false)
                 }
                 
-                return self.account.postbox.aroundMessageHistoryViewForLocation(.peer(peerId: id, threadId: nil), anchor: .upperBound, ignoreMessagesInTimestampRange: nil, count: 44, fixedCombinedReadStates: nil, topTaggedMessageIdNamespaces: Set(), tag: nil, appendMessagesFromTheSameGroup: false, namespaces: .not(Namespaces.Message.allNonRegular), orderStatistics: [])
+                return self.account.postbox.aroundMessageHistoryViewForLocation(.peer(peerId: id, threadId: nil), anchor: .upperBound, ignoreMessagesInTimestampRange: nil, ignoreMessageIds: Set(), count: 44, fixedCombinedReadStates: nil, topTaggedMessageIdNamespaces: Set(), tag: nil, appendMessagesFromTheSameGroup: false, namespaces: .not(Namespaces.Message.allNonRegular), orderStatistics: [])
                 |> map { view -> Bool in
                     for entry in view.0.entries {
                         if entry.message.flags.contains(.Incoming) {

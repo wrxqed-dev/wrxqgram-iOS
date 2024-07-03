@@ -378,7 +378,7 @@ final class PeerNameColorProfilePreviewItemNode: ListViewItemNode {
                 }
                 let iconSize = CGSize(width: 34.0, height: 34.0)
                 let _ = icon.update(
-                    transition: Transition(animation.transition),
+                    transition: ComponentTransition(animation.transition),
                     component: AnyComponent(EmojiStatusComponent(
                         context: item.context,
                         animationCache: item.context.animationCache,
@@ -428,7 +428,7 @@ final class PeerNameColorProfilePreviewItemNode: ListViewItemNode {
         }
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

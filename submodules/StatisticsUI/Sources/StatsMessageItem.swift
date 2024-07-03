@@ -649,7 +649,7 @@ final class StatsMessageItemNode: ListViewItemNode, ItemListItemNode {
                         let indicatorSize = CGSize(width: imageSize.width - lineWidth * 4.0, height: imageSize.height - lineWidth * 4.0)
 
                         let storyIndicator: ComponentView<Empty>
-                        let indicatorTransition: Transition = .immediate
+                        let indicatorTransition: ComponentTransition = .immediate
                         if let current = strongSelf.storyIndicator {
                             storyIndicator = current
                         } else {
@@ -754,7 +754,7 @@ final class StatsMessageItemNode: ListViewItemNode, ItemListItemNode {
         }
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

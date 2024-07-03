@@ -88,6 +88,15 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
     
     private var applicationInFocusDisposable: Disposable?
     private var storyUploadEventsDisposable: Disposable?
+    
+    override public var minimizedContainer: MinimizedContainer? {
+        didSet {
+            self.minimizedContainer?.navigationController = self
+            self.minimizedContainerUpdated(self.minimizedContainer)
+        }
+    }
+    
+    public var minimizedContainerUpdated: (MinimizedContainer?) -> Void = { _ in }
         
     public init(context: AccountContext) {
         self.context = context
@@ -271,6 +280,23 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         }
         controller.view.endEditing(true)
         presentedLegacyShortcutCamera(context: self.context, saveCapturedMedia: false, saveEditedPhotos: false, mediaGrouping: true, parentController: controller)
+    }
+    
+    public func openAppIcon() {
+        guard let rootTabController = self.rootTabController else {
+            return
+        }
+        
+        self.popToRoot(animated: false)
+        
+        if let index = rootTabController.controllers.firstIndex(where: { $0 is PeerInfoScreenImpl }) {
+            rootTabController.selectedIndex = index
+        }
+        
+        let themeController = themeSettingsController(context: self.context, focusOnItemTag: .icon)
+        var controllers: [UIViewController] = Array(self.viewControllers.prefix(1))
+        controllers.append(themeController)
+        self.setViewControllers(controllers, animated: true)
     }
     
     @discardableResult
@@ -670,6 +696,11 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
     }
 }
 
-extension MediaEditorScreen.Result: MediaEditorScreenResult {
-    
+//Xcode 16
+#if canImport(ContactProvider)
+extension MediaEditorScreen.Result: @retroactive MediaEditorScreenResult {
 }
+#else
+extension MediaEditorScreen.Result: MediaEditorScreenResult {
+}
+#endif

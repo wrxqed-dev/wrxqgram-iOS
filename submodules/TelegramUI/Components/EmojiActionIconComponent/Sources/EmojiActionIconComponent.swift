@@ -43,11 +43,23 @@ public final class EmojiActionIconComponent: Component {
     public final class View: UIView {
         private var icon: ComponentView<Empty>?
         
-        func update(component: EmojiActionIconComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: EmojiActionIconComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let size = CGSize(width: 24.0, height: 24.0)
             
-            if let fileId = component.fileId {
-                var iconSize = size
+            var iconSize = size
+            let content: EmojiStatusComponent.AnimationContent?
+            if let file = component.file {
+                if let dimensions = file.dimensions {
+                    iconSize = dimensions.cgSize.aspectFitted(size)
+                }
+                content = .file(file: file)
+            } else if let fileId = component.fileId {
+                content = .customEmoji(fileId: fileId)
+            } else {
+                content = nil
+            }
+            
+            if let content {
                 let icon: ComponentView<Empty>
                 if let current = self.icon {
                     icon = current
@@ -55,15 +67,7 @@ public final class EmojiActionIconComponent: Component {
                     icon = ComponentView()
                     self.icon = icon
                 }
-                let content: EmojiStatusComponent.AnimationContent
-                if let file = component.file {
-                    if let dimensions = file.dimensions {
-                        iconSize = dimensions.cgSize.aspectFitted(size)
-                    }
-                    content = .file(file: file)
-                } else {
-                    content = .customEmoji(fileId: fileId)
-                }
+             
                 let _ = icon.update(
                     transition: .immediate,
                     component: AnyComponent(EmojiStatusComponent(
@@ -105,7 +109,7 @@ public final class EmojiActionIconComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

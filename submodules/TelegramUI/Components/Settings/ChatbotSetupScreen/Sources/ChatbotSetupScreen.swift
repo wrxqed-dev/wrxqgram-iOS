@@ -220,7 +220,7 @@ final class ChatbotSetupScreenComponent: Component {
         }
         
         var scrolledUp = true
-        private func updateScrolling(transition: Transition) {
+        private func updateScrolling(transition: ComponentTransition) {
             let navigationRevealOffsetY: CGFloat = 0.0
             
             let navigationAlphaDistance: CGFloat = 16.0
@@ -476,7 +476,7 @@ final class ChatbotSetupScreenComponent: Component {
             }
         }
         
-        func update(component: ChatbotSetupScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: ChatbotSetupScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.isUpdating = true
             defer {
                 self.isUpdating = false
@@ -770,11 +770,11 @@ final class ChatbotSetupScreenComponent: Component {
                                     maximumNumberOfLines: 1
                                 ))),
                             ], alignment: .left, spacing: 2.0)),
-                            leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
+                            leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                                 image: checkIcon,
                                 tintColor: !self.hasAccessToAllChatsByDefault ? .clear : environment.theme.list.itemAccentColor,
                                 contentMode: .center
-                            ))),
+                            ))), false),
                             accessory: nil,
                             action: { [weak self] _ in
                                 guard let self else {
@@ -800,11 +800,11 @@ final class ChatbotSetupScreenComponent: Component {
                                     maximumNumberOfLines: 1
                                 ))),
                             ], alignment: .left, spacing: 2.0)),
-                            leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
+                            leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                                 image: checkIcon,
                                 tintColor: self.hasAccessToAllChatsByDefault ? .clear : environment.theme.list.itemAccentColor,
                                 contentMode: .center
-                            ))),
+                            ))), false),
                             accessory: nil,
                             action: { [weak self] _ in
                                 guard let self else {
@@ -1076,7 +1076,7 @@ final class ChatbotSetupScreenComponent: Component {
         return View()
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

@@ -78,7 +78,7 @@ private final class StoryStealthModeSheetContentComponent: Component {
         private func displayCooldown() {
             if !self.showCooldownToast {
                 self.showCooldownToast = true
-                self.state?.updated(transition: Transition(animation: .curve(duration: 0.25, curve: .easeInOut)))
+                self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.25, curve: .easeInOut)))
             }
             
             self.hideCooldownTimer?.invalidate()
@@ -91,16 +91,16 @@ private final class StoryStealthModeSheetContentComponent: Component {
                 
                 self.showCooldownToast = false
                 
-                self.state?.updated(transition: Transition(animation: .curve(duration: 0.25, curve: .easeInOut)))
+                self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.25, curve: .easeInOut)))
             })
         }
         
-        func update(component: StoryStealthModeSheetContentComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: StoryStealthModeSheetContentComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.component = component
             self.state = state
             
             var remainingCooldownSeconds: Int32 = 0
-            if case let .control(cooldownUntilTimestamp) = component.mode {
+            if case let .control(_, cooldownUntilTimestamp) = component.mode {
                 if let cooldownUntilTimestamp {
                     remainingCooldownSeconds = cooldownUntilTimestamp - Int32(Date().timeIntervalSince1970)
                     remainingCooldownSeconds = max(0, remainingCooldownSeconds)
@@ -243,9 +243,9 @@ private final class StoryStealthModeSheetContentComponent: Component {
             let buttonText: String
             let content: AnyComponentWithIdentity<Empty>
             switch component.mode {
-            case .control:
+            case let .control(external, _):
                 if remainingCooldownSeconds <= 0 {
-                    buttonText = environment.strings.Story_StealthMode_EnableAction
+                    buttonText = external ? environment.strings.Story_StealthMode_EnableAndOpenAction : environment.strings.Story_StealthMode_EnableAction
                 } else {
                     buttonText = environment.strings.Story_StealthMode_CooldownAction(stringForDuration(remainingCooldownSeconds)).string
                 }
@@ -283,7 +283,7 @@ private final class StoryStealthModeSheetContentComponent: Component {
                         }
                         
                         switch component.mode {
-                        case let .control(cooldownUntilTimestamp):
+                        case let .control(_, cooldownUntilTimestamp):
                             var remainingCooldownSeconds: Int32 = 0
                             if let cooldownUntilTimestamp {
                                 remainingCooldownSeconds = cooldownUntilTimestamp - Int32(Date().timeIntervalSince1970)
@@ -326,7 +326,7 @@ private final class StoryStealthModeSheetContentComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
@@ -385,7 +385,7 @@ private final class StoryStealthModeSheetScreenComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(component: StoryStealthModeSheetScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: Transition) -> CGSize {
+        func update(component: StoryStealthModeSheetScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: ComponentTransition) -> CGSize {
             self.component = component
             
             let environment = environment[ViewControllerComponentContainer.Environment.self].value
@@ -461,20 +461,21 @@ private final class StoryStealthModeSheetScreenComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
 
 public class StoryStealthModeSheetScreen: ViewControllerComponentContainer {
     public enum Mode: Equatable {
-        case control(cooldownUntilTimestamp: Int32?)
+        case control(external: Bool, cooldownUntilTimestamp: Int32?)
         case upgrade
     }
     
     public init(
         context: AccountContext,
         mode: Mode,
+        forceDark: Bool,
         backwardDuration: Int32,
         forwardDuration: Int32,
         buttonAction: (() -> Void)? = nil
@@ -485,7 +486,7 @@ public class StoryStealthModeSheetScreen: ViewControllerComponentContainer {
             backwardDuration: backwardDuration,
             forwardDuration: forwardDuration,
             buttonAction: buttonAction
-        ), navigationBarAppearance: .none, theme: .dark)
+        ), navigationBarAppearance: .none, theme: forceDark ? .dark : .default)
         
         self.statusBar.statusBarStyle = .Ignore
         self.navigationPresentation = .flatModal

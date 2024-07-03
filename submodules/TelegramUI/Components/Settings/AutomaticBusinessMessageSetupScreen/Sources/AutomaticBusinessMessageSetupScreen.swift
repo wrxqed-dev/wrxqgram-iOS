@@ -302,7 +302,7 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
         }
         
         var scrolledUp = true
-        private func updateScrolling(transition: Transition) {
+        private func updateScrolling(transition: ComponentTransition) {
             let navigationRevealOffsetY: CGFloat = 0.0
             
             let navigationAlphaDistance: CGFloat = 16.0
@@ -384,7 +384,7 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                 additionalCategories: ContactMultiselectionControllerAdditionalCategories(categories: additionalCategories, selectedCategories: selectedCategories),
                 chatListFilters: nil,
                 onlyUsers: true
-            )), options: [], filters: [], alwaysEnabled: true, limit: 100, reachedLimit: { _ in
+            )), filters: [], alwaysEnabled: true, limit: 100, reachedLimit: { _ in
             }))
             controller.navigationPresentation = .modal
             
@@ -483,7 +483,8 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                 chatLocation: .customChatContents,
                 subject: .customChatContents(contents: contents),
                 botStart: nil,
-                mode: .standard(.default)
+                mode: .standard(.default),
+                params: nil
             )
             chatController.navigationPresentation = .modal
             self.environment?.controller()?.push(chatController)
@@ -574,7 +575,7 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
             }
         }
         
-        func update(component: AutomaticBusinessMessageSetupScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: AutomaticBusinessMessageSetupScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.isUpdating = true
             defer {
                 self.isUpdating = false
@@ -675,7 +676,7 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
             self.component = component
             self.state = state
             
-            let alphaTransition: Transition = transition.animation.isImmediate ? transition : transition.withAnimation(.curve(duration: 0.25, curve: .easeInOut))
+            let alphaTransition: ComponentTransition = transition.animation.isImmediate ? transition : transition.withAnimation(.curve(duration: 0.25, curve: .easeInOut))
             
             if themeUpdated {
                 self.backgroundColor = environment.theme.list.blocksBackgroundColor
@@ -853,10 +854,10 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                             maximumNumberOfLines: 1
                         ))),
                     ], alignment: .left, spacing: 2.0)),
-                    leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
+                    leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
                         name: "Chat List/ComposeIcon",
                         tintColor: environment.theme.list.itemAccentColor
-                    ))),
+                    ))), false),
                     accessory: nil,
                     action: { [weak self] _ in
                         guard let self else {
@@ -929,11 +930,11 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                                 maximumNumberOfLines: 1
                             ))),
                         ], alignment: .left, spacing: 2.0)),
-                        leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
+                        leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                             image: checkIcon,
                             tintColor: !isSelected ? .clear : environment.theme.list.itemAccentColor,
                             contentMode: .center
-                        ))),
+                        ))), false),
                         accessory: nil,
                         action: { [weak self] _ in
                             guard let self else {
@@ -1199,11 +1200,11 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                                     maximumNumberOfLines: 1
                                 ))),
                             ], alignment: .left, spacing: 2.0)),
-                            leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
+                            leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                                 image: checkIcon,
                                 tintColor: !self.hasAccessToAllChatsByDefault ? .clear : environment.theme.list.itemAccentColor,
                                 contentMode: .center
-                            ))),
+                            ))), false),
                             accessory: nil,
                             action: { [weak self] _ in
                                 guard let self else {
@@ -1229,11 +1230,11 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                                     maximumNumberOfLines: 1
                                 ))),
                             ], alignment: .left, spacing: 2.0)),
-                            leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
+                            leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(Image(
                                 image: checkIcon,
                                 tintColor: self.hasAccessToAllChatsByDefault ? .clear : environment.theme.list.itemAccentColor,
                                 contentMode: .center
-                            ))),
+                            ))), false),
                             accessory: nil,
                             action: { [weak self] _ in
                                 guard let self else {
@@ -1277,10 +1278,10 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
                         maximumNumberOfLines: 1
                     ))),
                 ], alignment: .left, spacing: 2.0)),
-                leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
+                leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
                     name: "Chat List/AddIcon",
                     tintColor: environment.theme.list.itemAccentColor
-                ))),
+                ))), false),
                 accessory: nil,
                 action: { [weak self] _ in
                     guard let self else {
@@ -1536,7 +1537,7 @@ final class AutomaticBusinessMessageSetupScreenComponent: Component {
         return View()
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

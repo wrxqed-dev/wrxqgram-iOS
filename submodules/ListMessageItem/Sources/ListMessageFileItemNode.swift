@@ -369,7 +369,7 @@ public final class ListMessageFileItemNode: ListMessageNode {
     private var absoluteLocation: (CGRect, CGSize)?
     
     private var context: AccountContext?
-    private (set) var message: Message?
+    private(set) var message: Message?
     
     private var appliedItem: ListMessageItem?
     private var layoutParams: ListViewItemLayoutParams?
@@ -540,8 +540,8 @@ public final class ListMessageFileItemNode: ListMessageNode {
         }
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
-        super.animateInsertion(currentTimestamp, duration: duration, short: short)
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
+        super.animateInsertion(currentTimestamp, duration: duration, options: options)
         
         self.transitionOffset = self.bounds.size.height * 1.6
         self.addTransitionOffsetAnimation(0.0, duration: duration, beginAt: currentTimestamp)

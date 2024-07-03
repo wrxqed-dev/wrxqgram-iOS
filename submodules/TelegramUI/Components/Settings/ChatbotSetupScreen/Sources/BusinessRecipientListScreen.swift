@@ -141,7 +141,7 @@ final class BusinessRecipientListScreenComponent: Component {
         }
         
         var scrolledUp = true
-        private func updateScrolling(transition: Transition) {
+        private func updateScrolling(transition: ComponentTransition) {
             let navigationRevealOffsetY: CGFloat = 0.0
             
             let navigationAlphaDistance: CGFloat = 16.0
@@ -242,7 +242,7 @@ final class BusinessRecipientListScreenComponent: Component {
                 additionalCategories: ContactMultiselectionControllerAdditionalCategories(categories: additionalCategories, selectedCategories: selectedCategories),
                 chatListFilters: nil,
                 onlyUsers: true
-            )), options: [], filters: [], alwaysEnabled: true, limit: 100, reachedLimit: { _ in
+            )), filters: [], alwaysEnabled: true, limit: 100, reachedLimit: { _ in
             }))
             controller.navigationPresentation = .modal
             
@@ -348,7 +348,7 @@ final class BusinessRecipientListScreenComponent: Component {
             environment.controller()?.push(controller)
         }
         
-        func update(component: BusinessRecipientListScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: BusinessRecipientListScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.isUpdating = true
             defer {
                 self.isUpdating = false
@@ -422,10 +422,10 @@ final class BusinessRecipientListScreenComponent: Component {
                         maximumNumberOfLines: 1
                     ))),
                 ], alignment: .left, spacing: 2.0)),
-                leftIcon: AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
+                leftIcon: .custom(AnyComponentWithIdentity(id: 0, component: AnyComponent(BundleIconComponent(
                     name: "Chat List/AddIcon",
                     tintColor: environment.theme.list.itemAccentColor
-                ))),
+                ))), false),
                 accessory: nil,
                 action: { [weak self] _ in
                     guard let self else {
@@ -646,7 +646,7 @@ final class BusinessRecipientListScreenComponent: Component {
         return View()
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

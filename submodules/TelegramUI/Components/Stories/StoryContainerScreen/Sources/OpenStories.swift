@@ -14,7 +14,7 @@ public extension StoryContainerScreen {
         |> take(1)
         |> mapToSignal { state -> Signal<Void, NoError> in
             if let slice = state.slice {
-                return waitUntilStoryMediaPreloaded(context: context, peerId: slice.peer.id, storyItem: slice.item.storyItem)
+                return waitUntilStoryMediaPreloaded(context: context, peerId: slice.effectivePeer.id, storyItem: slice.item.storyItem)
                 |> timeout(4.0, queue: .mainQueue(), alternate: .complete())
                 |> map { _ -> Void in
                 }
@@ -170,7 +170,8 @@ public extension StoryContainerScreen {
         transitionIn: @escaping () -> StoryContainerScreen.TransitionIn?,
         transitionOut: @escaping (EnginePeer.Id) -> StoryContainerScreen.TransitionOut?,
         setFocusedItem: @escaping (Signal<StoryId?, NoError>) -> Void,
-        setProgress: @escaping (Signal<Never, NoError>) -> Void
+        setProgress: @escaping (Signal<Never, NoError>) -> Void,
+        completion: @escaping (StoryContainerScreen) -> Void = { _ in }
     ) {
         let storyContent = StoryContentContextImpl(context: context, isHidden: isHidden, focusedPeerId: peerId, singlePeer: singlePeer, fixedOrder: initialOrder)
         let signal = storyContent.state
@@ -184,7 +185,7 @@ public extension StoryContainerScreen {
                 }
                 #endif
                 
-                return waitUntilStoryMediaPreloaded(context: context, peerId: slice.peer.id, storyItem: slice.item.storyItem)
+                return waitUntilStoryMediaPreloaded(context: context, peerId: slice.effectivePeer.id, storyItem: slice.item.storyItem)
                 |> timeout(4.0, queue: .mainQueue(), alternate: .complete())
                 |> map { _ -> StoryContentContextState in
                 }
@@ -211,6 +212,7 @@ public extension StoryContainerScreen {
             )
             setFocusedItem(storyContainerScreen.focusedItem)
             parentController?.push(storyContainerScreen)
+            completion(storyContainerScreen)
         }
         |> ignoreValues
         

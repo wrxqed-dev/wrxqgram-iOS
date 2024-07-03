@@ -56,6 +56,8 @@ public struct ExperimentalUISettings: Codable, Equatable {
     public var dustEffect: Bool
     public var callV2: Bool
     public var allowWebViewInspection: Bool
+    public var disableReloginTokens: Bool
+    public var liveStreamV2: Bool
     
     public static var defaultSettings: ExperimentalUISettings {
         return ExperimentalUISettings(
@@ -89,7 +91,9 @@ public struct ExperimentalUISettings: Codable, Equatable {
             crashOnMemoryPressure: false,
             dustEffect: false,
             callV2: false,
-            allowWebViewInspection: false
+            allowWebViewInspection: false,
+            disableReloginTokens: false,
+            liveStreamV2: false
         )
     }
     
@@ -124,7 +128,9 @@ public struct ExperimentalUISettings: Codable, Equatable {
         crashOnMemoryPressure: Bool,
         dustEffect: Bool,
         callV2: Bool,
-        allowWebViewInspection: Bool
+        allowWebViewInspection: Bool,
+        disableReloginTokens: Bool,
+        liveStreamV2: Bool
     ) {
         self.keepChatNavigationStack = keepChatNavigationStack
         self.skipReadHistory = skipReadHistory
@@ -157,6 +163,8 @@ public struct ExperimentalUISettings: Codable, Equatable {
         self.dustEffect = dustEffect
         self.callV2 = callV2
         self.allowWebViewInspection = allowWebViewInspection
+        self.disableReloginTokens = disableReloginTokens
+        self.liveStreamV2 = liveStreamV2
     }
     
     public init(from decoder: Decoder) throws {
@@ -193,6 +201,8 @@ public struct ExperimentalUISettings: Codable, Equatable {
         self.dustEffect = try container.decodeIfPresent(Bool.self, forKey: "dustEffect") ?? false
         self.callV2 = try container.decodeIfPresent(Bool.self, forKey: "callV2") ?? false
         self.allowWebViewInspection = try container.decodeIfPresent(Bool.self, forKey: "allowWebViewInspection") ?? false
+        self.disableReloginTokens = try container.decodeIfPresent(Bool.self, forKey: "disableReloginTokens") ?? false
+        self.liveStreamV2 = try container.decodeIfPresent(Bool.self, forKey: "liveStreamV2") ?? false
     }
     
     public func encode(to encoder: Encoder) throws {
@@ -229,6 +239,8 @@ public struct ExperimentalUISettings: Codable, Equatable {
         try container.encode(self.dustEffect, forKey: "dustEffect")
         try container.encode(self.callV2, forKey: "callV2")
         try container.encode(self.allowWebViewInspection, forKey: "allowWebViewInspection")
+        try container.encode(self.disableReloginTokens, forKey: "disableReloginTokens")
+        try container.encode(self.liveStreamV2, forKey: "liveStreamV2")
     }
 }
 

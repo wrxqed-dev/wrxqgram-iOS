@@ -31,6 +31,7 @@ public enum PremiumIntroSource {
     case storiesExpirationDurations
     case storiesSuggestedReactions
     case storiesHigherQuality
+    case storiesLinks
     case channelBoost(EnginePeer.Id)
     case nameColor
     case similarChannels
@@ -39,6 +40,8 @@ public enum PremiumIntroSource {
     case readTime
     case messageTags
     case folderTags
+    case animatedEmoji
+    case messageEffects
 }
 
 public enum PremiumGiftSource: Equatable {
@@ -72,6 +75,8 @@ public enum PremiumDemoSubject {
     case lastSeen
     case messagePrivacy
     case folderTags
+    case business
+    case messageEffects
     
     case businessLocation
     case businessHours
@@ -120,6 +125,7 @@ public struct PremiumConfiguration {
     public static var defaultValue: PremiumConfiguration {
         return PremiumConfiguration(
             isPremiumDisabled: false,
+            areStarsDisabled: true,
             subscriptionManagementUrl: "",
             showPremiumGiftInAttachMenu: false,
             showPremiumGiftInTextField: false,
@@ -145,6 +151,7 @@ public struct PremiumConfiguration {
     }
     
     public let isPremiumDisabled: Bool
+    public let areStarsDisabled: Bool
     public let subscriptionManagementUrl: String
     public let showPremiumGiftInAttachMenu: Bool
     public let showPremiumGiftInTextField: Bool
@@ -169,6 +176,7 @@ public struct PremiumConfiguration {
     
     fileprivate init(
         isPremiumDisabled: Bool,
+        areStarsDisabled: Bool,
         subscriptionManagementUrl: String,
         showPremiumGiftInAttachMenu: Bool,
         showPremiumGiftInTextField: Bool,
@@ -192,6 +200,7 @@ public struct PremiumConfiguration {
         minGroupAudioTranscriptionLevel: Int32
     ) {
         self.isPremiumDisabled = isPremiumDisabled
+        self.areStarsDisabled = areStarsDisabled
         self.subscriptionManagementUrl = subscriptionManagementUrl
         self.showPremiumGiftInAttachMenu = showPremiumGiftInAttachMenu
         self.showPremiumGiftInTextField = showPremiumGiftInTextField
@@ -223,6 +232,7 @@ public struct PremiumConfiguration {
             }
             return PremiumConfiguration(
                 isPremiumDisabled: data["premium_purchase_blocked"] as? Bool ?? defaultValue.isPremiumDisabled,
+                areStarsDisabled: data["stars_purchase_blocked"] as? Bool ?? defaultValue.areStarsDisabled,
                 subscriptionManagementUrl: data["premium_manage_subscription_url"] as? String ?? "",
                 showPremiumGiftInAttachMenu: data["premium_gift_attach_menu_icon"] as? Bool ?? defaultValue.showPremiumGiftInAttachMenu,
                 showPremiumGiftInTextField: data["premium_gift_text_field_icon"] as? Bool ?? defaultValue.showPremiumGiftInTextField,
