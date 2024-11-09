@@ -31,7 +31,7 @@ private func presentLiveLocationController(context: AccountContext, peerId: Peer
         if let message = message, let strongController = controller {
             let _ = context.sharedContext.openChatMessage(OpenChatMessageParams(context: context, chatLocation: nil, chatFilterTag: nil, chatLocationContextHolder: nil, message: message._asMessage(), standalone: false, reverseMessageGalleryOrder: false, navigationController: strongController.navigationController as? NavigationController, modal: true, dismissInput: {
                 controller?.view.endEditing(true)
-            }, present: { c, a in
+            }, present: { c, a, _ in
                 controller?.present(c, in: .window(.root), with: a, blockInteraction: true)
             }, transitionNode: { _, _, _ in
                 return nil
@@ -461,6 +461,40 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                         invite: nil,
                         activeCall: EngineGroupCallDescription(id: groupCallPanelData.info.id, accessHash: groupCallPanelData.info.accessHash, title: groupCallPanelData.info.title, scheduleTimestamp: groupCallPanelData.info.scheduleTimestamp, subscribedToScheduled: groupCallPanelData.info.subscribedToScheduled, isStream: groupCallPanelData.info.isStream)
                     )
+                }, notifyScheduledTapAction: { [weak self] in
+                    guard let self, let groupCallPanelData = self.groupCallPanelData else {
+                        return
+                    }
+                    if groupCallPanelData.info.scheduleTimestamp != nil && !groupCallPanelData.info.subscribedToScheduled {
+                        let _ = self.context.engine.calls.toggleScheduledGroupCallSubscription(peerId: groupCallPanelData.peerId, callId: groupCallPanelData.info.id, accessHash: groupCallPanelData.info.accessHash, subscribe: true).startStandalone()
+                        
+                        //TODO:localize
+                        let controller = UndoOverlayController(
+                            presentationData: presentationData,
+                            content: .universal(
+                                animation: "anim_profileunmute",
+                                scale: 0.075,
+                                colors: [
+                                    "Middle.Group 1.Fill 1": UIColor.white,
+                                    "Top.Group 1.Fill 1": UIColor.white,
+                                    "Bottom.Group 1.Fill 1": UIColor.white,
+                                    "EXAMPLE.Group 1.Fill 1": UIColor.white,
+                                    "Line.Group 1.Stroke 1": UIColor.white
+                                ],
+                                title: nil,
+                                text: "You will be notified when the liver stream starts.",
+                                customUndoText: nil,
+                                timeout: nil
+                            ),
+                            elevatedLayout: false,
+                            animateInAsReplacement: false,
+                            action: { _ in
+                                return true
+                            }
+                        )
+                        self.audioRateTooltipController = controller
+                        self.present(controller, in: .current)
+                    }
                 })
                 if let accessoryPanelContainer = self.accessoryPanelContainer {
                     accessoryPanelContainer.addSubnode(groupCallAccessoryPanel)
@@ -829,7 +863,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                                 strongSelf.displayNode.view.window?.endEditing(true)
                                 strongSelf.present(controller, in: .window(.root))
                             } else if case let .messages(chatLocation, _, _) = playlistLocation {
-                                let signal = strongSelf.context.sharedContext.messageFromPreloadedChatHistoryViewForLocation(id: id.messageId, location: ChatHistoryLocationInput(content: .InitialSearch(subject: MessageHistoryInitialSearchSubject(location: .id(id.messageId), quote: nil), count: 60, highlight: true), id: 0), context: strongSelf.context, chatLocation: chatLocation, subject: nil, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>(value: nil), tag: .tag(MessageTags.music))
+                                let signal = strongSelf.context.sharedContext.messageFromPreloadedChatHistoryViewForLocation(id: id.messageId, location: ChatHistoryLocationInput(content: .InitialSearch(subject: MessageHistoryInitialSearchSubject(location: .id(id.messageId), quote: nil), count: 60, highlight: true, setupReply: false), id: 0), context: strongSelf.context, chatLocation: chatLocation, subject: nil, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>(value: nil), tag: .tag(MessageTags.music))
                                 
                                 var cancelImpl: (() -> Void)?
                                 let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
