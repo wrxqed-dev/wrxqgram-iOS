@@ -73,7 +73,7 @@ public final class ChatListNodeInteraction {
     }
     
     let activateSearch: () -> Void
-    let peerSelected: (EnginePeer, EnginePeer?, Int64?, ChatListNodeEntryPromoInfo?) -> Void
+    let peerSelected: (EnginePeer, EnginePeer?, Int64?, ChatListNodeEntryPromoInfo?, Bool) -> Void
     let disabledPeerSelected: (EnginePeer, Int64?, ChatListDisabledPeerReason) -> Void
     let togglePeerSelected: (EnginePeer, Int64?) -> Void
     let togglePeersSelection: ([PeerEntry], Bool) -> Void
@@ -112,6 +112,7 @@ public final class ChatListNodeInteraction {
     let openStarsTopup: (Int64?) -> Void
     let dismissNotice: (ChatListNotice) -> Void
     let editPeer: (ChatListItem) -> Void
+    let openWebApp: (TelegramUser) -> Void
     
     public var searchTextHighightState: String?
     var highlightedChatLocation: ChatListHighlightedLocation?
@@ -129,7 +130,7 @@ public final class ChatListNodeInteraction {
         animationCache: AnimationCache,
         animationRenderer: MultiAnimationRenderer,
         activateSearch: @escaping () -> Void,
-        peerSelected: @escaping (EnginePeer, EnginePeer?, Int64?, ChatListNodeEntryPromoInfo?) -> Void,
+        peerSelected: @escaping (EnginePeer, EnginePeer?, Int64?, ChatListNodeEntryPromoInfo?, Bool) -> Void,
         disabledPeerSelected: @escaping (EnginePeer, Int64?, ChatListDisabledPeerReason) -> Void,
         togglePeerSelected: @escaping (EnginePeer, Int64?) -> Void,
         togglePeersSelection: @escaping ([PeerEntry], Bool) -> Void,
@@ -167,7 +168,8 @@ public final class ChatListNodeInteraction {
         openStories: @escaping (ChatListNode.OpenStoriesSubject, ASDisplayNode?) -> Void,
         openStarsTopup: @escaping (Int64?) -> Void,
         dismissNotice: @escaping (ChatListNotice) -> Void,
-        editPeer: @escaping (ChatListItem) -> Void
+        editPeer: @escaping (ChatListItem) -> Void,
+        openWebApp: @escaping (TelegramUser) -> Void
     ) {
         self.activateSearch = activateSearch
         self.peerSelected = peerSelected
@@ -211,6 +213,7 @@ public final class ChatListNodeInteraction {
         self.openStarsTopup = openStarsTopup
         self.dismissNotice = dismissNotice
         self.editPeer = editPeer
+        self.openWebApp = openWebApp
     }
 }
 
@@ -516,10 +519,13 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                                         default:
                                             break
                                         }
+                                    } else if case let .channel(peer) = peer, case .group = peer.info, peer.hasPermission(.inviteMembers) {
+                                        canManage = true
+                                    } else if case let .channel(peer) = peer, case .broadcast = peer.info, peer.hasPermission(.addAdmins) {
+                                        canManage = true
                                     }
                                     
                                     if canManage {
-                                    } else if case let .channel(peer) = peer, case .group = peer.info, peer.hasPermission(.inviteMembers) {
                                     } else {
                                         enabled = false
                                     }
@@ -613,7 +619,7 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                                     if editing {
                                         nodeInteraction.togglePeerSelected(chatPeer, threadId)
                                     } else {
-                                        nodeInteraction.peerSelected(chatPeer, nil, threadId, nil)
+                                        nodeInteraction.peerSelected(chatPeer, nil, threadId, nil, false)
                                     }
                                 }
                             }, disabledAction: (isForum && editing) && !peerEntry.requiresPremiumForMessaging ? nil : { _ in
@@ -644,13 +650,17 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                         status: status,
                         requiresPremiumForMessaging: peerEntry.requiresPremiumForMessaging,
                         enabled: true,
-                        selection: .none,
+                        selection: editing ? .selectable(selected: selected) : .none,
                         editing: ContactsPeerItemEditing(editable: false, editing: false, revealed: false),
                         index: nil,
                         header: nil,
                         action: { _ in
                             if let chatPeer = chatPeer {
-                                nodeInteraction.peerSelected(chatPeer, nil, nil, nil)
+                                if editing {
+                                    nodeInteraction.togglePeerSelected(chatPeer, nil)
+                                } else {
+                                    nodeInteraction.peerSelected(chatPeer, nil, nil, nil, false)
+                                }
                             }
                         }, disabledAction: peerEntry.requiresPremiumForMessaging ? { _ in
                             if let chatPeer {
@@ -715,7 +725,7 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                     index: nil,
                     header: header,
                     action: { _ in
-                        nodeInteraction.peerSelected(contactEntry.peer, nil, nil, nil)
+                        nodeInteraction.peerSelected(contactEntry.peer, nil, nil, nil, false)
                     },
                     disabledAction: nil,
                     animationCache: nodeInteraction.animationCache,
@@ -751,7 +761,7 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                         case .reviewLogin:
                             break
                         case let .starsSubscriptionLowBalance(amount, _):
-                            nodeInteraction?.openStarsTopup(amount)
+                            nodeInteraction?.openStarsTopup(amount.value)
                         }
                     case .hide:
                         nodeInteraction?.dismissNotice(notice)
@@ -953,7 +963,7 @@ private func mappedUpdateEntries(context: AccountContext, nodeInteraction: ChatL
                                     if editing {
                                         nodeInteraction.togglePeerSelected(chatPeer, threadId)
                                     } else {
-                                        nodeInteraction.peerSelected(chatPeer, nil, threadId, nil)
+                                        nodeInteraction.peerSelected(chatPeer, nil, threadId, nil, false)
                                     }
                                 }
                             }, disabledAction: (isForum && editing) && !peerEntry.requiresPremiumForMessaging ? nil : { _ in
@@ -984,13 +994,17 @@ private func mappedUpdateEntries(context: AccountContext, nodeInteraction: ChatL
                             status: status,
                             requiresPremiumForMessaging: peerEntry.requiresPremiumForMessaging,
                             enabled: true,
-                            selection: .none,
+                            selection: editing ? .selectable(selected: selected) : .none,
                             editing: ContactsPeerItemEditing(editable: false, editing: false, revealed: false),
                             index: nil,
                             header: nil,
                             action: { _ in
                                 if let chatPeer = chatPeer {
-                                    nodeInteraction.peerSelected(chatPeer, nil, nil, nil)
+                                    if editing {
+                                        nodeInteraction.togglePeerSelected(chatPeer, nil)
+                                    } else {
+                                        nodeInteraction.peerSelected(chatPeer, nil, nil, nil, false)
+                                    }
                                 }
                             }, disabledAction: peerEntry.requiresPremiumForMessaging ? { _ in
                                 if let chatPeer {
@@ -1055,7 +1069,7 @@ private func mappedUpdateEntries(context: AccountContext, nodeInteraction: ChatL
                     index: nil,
                     header: header,
                     action: { _ in
-                        nodeInteraction.peerSelected(contactEntry.peer, nil, nil, nil)
+                        nodeInteraction.peerSelected(contactEntry.peer, nil, nil, nil, false)
                     },
                     disabledAction: nil,
                     animationCache: nodeInteraction.animationCache,
@@ -1091,7 +1105,7 @@ private func mappedUpdateEntries(context: AccountContext, nodeInteraction: ChatL
                         case .reviewLogin:
                             break
                         case let .starsSubscriptionLowBalance(amount, _):
-                            nodeInteraction?.openStarsTopup(amount)
+                            nodeInteraction?.openStarsTopup(amount.value)
                         }
                     case .hide:
                         nodeInteraction?.dismissNotice(notice)
@@ -1212,6 +1226,7 @@ public final class ChatListNode: ListView {
     public var openBirthdaySetup: (() -> Void)?
     public var openPremiumManagement: (() -> Void)?
     public var openStarsTopup: ((Int64?) -> Void)?
+    public var openWebApp: ((TelegramUser) -> Void)?
     
     private var theme: PresentationTheme
     
@@ -1387,7 +1402,7 @@ public final class ChatListNode: ListView {
             if let strongSelf = self, let activateSearch = strongSelf.activateSearch {
                 activateSearch()
             }
-        }, peerSelected: { [weak self] peer, _, threadId, promoInfo in
+        }, peerSelected: { [weak self] peer, _, threadId, promoInfo, _ in
             if let strongSelf = self, let peerSelected = strongSelf.peerSelected {
                 peerSelected(peer, threadId, true, true, promoInfo)
             }
@@ -1719,7 +1734,7 @@ public final class ChatListNode: ListView {
                 |> filter { !$0.isEmpty }
                 |> deliverOnMainQueue).start(next: { giftOptions in
                     let premiumOptions = giftOptions.filter { $0.users == 1 }.map { CachedPremiumGiftOption(months: $0.months, currency: $0.currency, amount: $0.amount, botUrl: "", storeProductId: $0.storeProductId) }
-                    let controller = self.context.sharedContext.makeGiftOptionsController(context: self.context, peerId: peerId, premiumOptions: premiumOptions)
+                    let controller = self.context.sharedContext.makeGiftOptionsController(context: self.context, peerId: peerId, premiumOptions: premiumOptions, hasBirthday: true)
                     controller.navigationPresentation = .modal
                     self.push?(controller)
                 })
@@ -1859,6 +1874,11 @@ public final class ChatListNode: ListView {
                 break
             }
         }, editPeer: { _ in
+        }, openWebApp: { [weak self] user in
+            guard let self else {
+                return
+            }
+            self.openWebApp?(user)
         })
         nodeInteraction.isInlineMode = isInlineMode
         
@@ -1995,7 +2015,7 @@ public final class ChatListNode: ListView {
                     if let starsSubscriptionsContext {
                         return starsSubscriptionsContext.state
                         |> map { state in
-                            if state.balance > 0 && !state.subscriptions.isEmpty {
+                            if state.balance > StarsAmount.zero && !state.subscriptions.isEmpty {
                                 return .starsSubscriptionLowBalance(
                                     amount: state.balance,
                                     peers: state.subscriptions.map { $0.peer }
@@ -2396,10 +2416,13 @@ public final class ChatListNode: ListView {
                                     default:
                                         break
                                     }
+                                } else if case let .channel(peer) = peer, case .group = peer.info, peer.hasPermission(.inviteMembers) {
+                                    canManage = true
+                                } else if case let .channel(peer) = peer, case .broadcast = peer.info, peer.hasPermission(.addAdmins) {
+                                    canManage = true
                                 }
                                 
                                 if canManage {
-                                } else if case let .channel(peer) = peer, case .group = peer.info, peer.hasPermission(.inviteMembers) {
                                 } else {
                                     return false
                                 }

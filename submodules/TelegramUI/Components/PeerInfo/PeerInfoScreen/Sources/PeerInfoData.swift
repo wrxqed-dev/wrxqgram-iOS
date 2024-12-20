@@ -15,6 +15,7 @@ import DeviceAccess
 import PeerInfoVisualMediaPaneNode
 import PhotoResources
 import PeerInfoPaneNode
+import WebUI
 
 enum PeerInfoUpdatingAvatar {
     case none
@@ -386,6 +387,7 @@ final class PeerInfoScreenData {
     let revenueStatsContext: RevenueStatsContext?
     let profileGiftsContext: ProfileGiftsContext?
     let premiumGiftOptions: [PremiumGiftCodeOption]
+    let webAppPermissions: WebAppPermissionsState?
     
     let _isContact: Bool
     var forceIsContact: Bool = false
@@ -434,7 +436,8 @@ final class PeerInfoScreenData {
         revenueStatsState: RevenueStats?,
         revenueStatsContext: RevenueStatsContext?,
         profileGiftsContext: ProfileGiftsContext?,
-        premiumGiftOptions: [PremiumGiftCodeOption]
+        premiumGiftOptions: [PremiumGiftCodeOption],
+        webAppPermissions: WebAppPermissionsState?
     ) {
         self.peer = peer
         self.chatPeer = chatPeer
@@ -472,6 +475,7 @@ final class PeerInfoScreenData {
         self.revenueStatsContext = revenueStatsContext
         self.profileGiftsContext = profileGiftsContext
         self.premiumGiftOptions = premiumGiftOptions
+        self.webAppPermissions = webAppPermissions
     }
 }
 
@@ -794,7 +798,7 @@ func peerInfoScreenSettingsData(context: AccountContext, peerId: EnginePeer.Id, 
     let botsKey = ValueBoxKey(length: 8)
     botsKey.setInt64(0, value: 0)
     
-    let iconLoaded = Atomic<[EnginePeer.Id: Bool]>(value: [:])
+    //let iconLoaded = Atomic<[EnginePeer.Id: Bool]>(value: [:])
     let bots = context.engine.data.subscribe(TelegramEngine.EngineData.Item.ItemCache.Item(collectionId: Namespaces.CachedItemCollection.attachMenuBots, id: botsKey))
     |> mapToSignal { entry -> Signal<[AttachMenuBot], NoError> in
         let bots: [AttachMenuBots.Bot] = entry?.get(AttachMenuBots.self)?.bots ?? []
@@ -807,32 +811,7 @@ func peerInfoScreenSettingsData(context: AccountContext, peerId: EnginePeer.Id, 
                 if let maybePeer = peersMap[bot.peerId], let peer = maybePeer {
                     let resultBot = AttachMenuBot(peer: peer, shortName: bot.name, icons: bot.icons, peerTypes: bot.peerTypes, flags: bot.flags)
                     if bot.flags.contains(.showInSettings) {
-                        if let peer = PeerReference(peer._asPeer()), let icon = bot.icons[.iOSSettingsStatic] {
-                            let fileReference: FileMediaReference = .attachBot(peer: peer, media: icon)
-                            let signal: Signal<AttachMenuBot?, NoError>
-                            if let _ = iconLoaded.with({ $0 })[peer.id] {
-                                signal = .single(resultBot)
-                            } else {
-                                signal = .single(nil)
-                                |> then(
-                                    preloadedBotIcon(account: context.account, fileReference: fileReference)
-                                    |> filter { $0 }
-                                    |> map { _ -> AttachMenuBot? in
-                                        return resultBot
-                                    }
-                                    |> afterNext { _ in
-                                        let _ = iconLoaded.modify { current in
-                                            var updated = current
-                                            updated[peer.id] = true
-                                            return updated
-                                        }
-                                    }
-                                )
-                            }
-                            result.append(signal)
-                        } else {
-                            result.append(.single(resultBot))
-                        }
+                        result.append(.single(resultBot))
                     }
                 }
             }
@@ -967,7 +946,8 @@ func peerInfoScreenSettingsData(context: AccountContext, peerId: EnginePeer.Id, 
             revenueStatsState: nil,
             revenueStatsContext: nil,
             profileGiftsContext: nil,
-            premiumGiftOptions: []
+            premiumGiftOptions: [],
+            webAppPermissions: nil
         )
     }
 }
@@ -1015,7 +995,8 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                 revenueStatsState: nil,
                 revenueStatsContext: nil,
                 profileGiftsContext: nil,
-                premiumGiftOptions: []
+                premiumGiftOptions: [],
+                webAppPermissions: nil
             ))
         case let .user(userPeerId, secretChatId, kind):
             let groupsInCommon: GroupsInCommonContext?
@@ -1310,7 +1291,16 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     return (revenueStatsContext, state.stats)
                 }
             }
-                        
+            
+            let webAppPermissions: Signal<WebAppPermissionsState?, NoError> = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+            |> mapToSignal { peer -> Signal<WebAppPermissionsState?, NoError> in
+                if let peer, case let .user(user) = peer, let _ = user.botInfo {
+                    return webAppPermissionsState(context: context, peerId: peerId)
+                } else {
+                    return .single(nil)
+                }
+            }
+                     
             return combineLatest(
                 context.account.viewTracker.peerView(peerId, updateData: true),
                 peerInfoAvailableMediaPanes(context: context, peerId: peerId, chatLocation: chatLocation, isMyProfile: isMyProfile, chatLocationContextHolder: chatLocationContextHolder),
@@ -1329,9 +1319,10 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                 privacySettings,
                 starsRevenueContextAndState,
                 revenueContextAndState,
-                premiumGiftOptions
+                premiumGiftOptions,
+                webAppPermissions
             )
-            |> map { peerView, availablePanes, globalNotificationSettings, encryptionKeyFingerprint, status, hasStories, hasStoryArchive, accountIsPremium, savedMessagesPeer, hasSavedMessagesChats, hasSavedMessages, hasSavedMessageTags, hasBotPreviewItems, personalChannel, privacySettings, starsRevenueContextAndState, revenueContextAndState, premiumGiftOptions -> PeerInfoScreenData in
+            |> map { peerView, availablePanes, globalNotificationSettings, encryptionKeyFingerprint, status, hasStories, hasStoryArchive, accountIsPremium, savedMessagesPeer, hasSavedMessagesChats, hasSavedMessages, hasSavedMessageTags, hasBotPreviewItems, personalChannel, privacySettings, starsRevenueContextAndState, revenueContextAndState, premiumGiftOptions, webAppPermissions -> PeerInfoScreenData in
                 var availablePanes = availablePanes
                 if isMyProfile {
                     availablePanes?.insert(.stories, at: 0)
@@ -1450,7 +1441,8 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     revenueStatsState: revenueContextAndState.1,
                     revenueStatsContext: revenueContextAndState.0,
                     profileGiftsContext: profileGiftsContext,
-                    premiumGiftOptions: premiumGiftOptions
+                    premiumGiftOptions: premiumGiftOptions,
+                    webAppPermissions: webAppPermissions
                 )
             }
         case .channel:
@@ -1662,7 +1654,8 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     revenueStatsState: revenueContextAndState.1,
                     revenueStatsContext: revenueContextAndState.0,
                     profileGiftsContext: nil,
-                    premiumGiftOptions: []
+                    premiumGiftOptions: [],
+                    webAppPermissions: nil
                 )
             }
         case let .group(groupId):
@@ -1965,7 +1958,8 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     revenueStatsState: nil,
                     revenueStatsContext: nil,
                     profileGiftsContext: nil,
-                    premiumGiftOptions: []
+                    premiumGiftOptions: [],
+                    webAppPermissions: nil
                 ))
             }
         }
