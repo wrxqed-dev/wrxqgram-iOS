@@ -29,10 +29,12 @@ swift_library(
         "//submodules/TelegramUI/Components/EmojiStatusComponent",
         "//submodules/TelegramUI/Components/SliderComponent",
         "//submodules/TelegramUI/Components/Utils/RoundedRectWithTailPath",
+        "//submodules/TelegramUI/Components/CheckComponent",
         "//submodules/AvatarNode",
         "//submodules/Components/BundleIconComponent",
         "//submodules/CheckNode",
         "//submodules/TextFormat",
+        "//submodules/TelegramUI/Components/Stars/StarsBalanceOverlayComponent",
     ],
     visibility = [
         "//visibility:public",

@@ -236,7 +236,7 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
                 if let peer = forwardInfo.author {
                     author = peer
                 } else if let authorSignature = forwardInfo.authorSignature {
-                    author = TelegramUser(id: PeerId(namespace: Namespaces.Peer.Empty, id: PeerId.Id._internalFromInt64Value(Int64(authorSignature.persistentHashValue % 32))), accessHash: nil, firstName: authorSignature, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil)
+                    author = TelegramUser(id: PeerId(namespace: Namespaces.Peer.Empty, id: PeerId.Id._internalFromInt64Value(Int64(authorSignature.persistentHashValue % 32))), accessHash: nil, firstName: authorSignature, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
                 }
             }
             
@@ -315,7 +315,7 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
             
             var mediaAndFlags = mediaAndFlags
             if let mediaAndFlagsValue = mediaAndFlags {
-                if mediaAndFlagsValue.0.first is TelegramMediaStory || mediaAndFlagsValue.0.first is WallpaperPreviewMedia {
+                if mediaAndFlagsValue.0.first is TelegramMediaStory || mediaAndFlagsValue.0.first is WallpaperPreviewMedia || mediaAndFlagsValue.0.first is UniqueGiftPreviewMedia {
                     var flags = mediaAndFlagsValue.1
                     flags.remove(.preferMediaInline)
                     mediaAndFlags = (mediaAndFlagsValue.0, flags)
@@ -360,7 +360,9 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
                             contentMediaAutomaticDownload = .prefetch
                         }
                         
-                        if file.isAnimated {
+                        if let _ = file.videoCover {
+                            contentMediaAutomaticPlayback = false
+                        } else if file.isAnimated {
                             contentMediaAutomaticPlayback = context.sharedContext.energyUsageSettings.autoplayGif
                         } else if file.isVideo && context.sharedContext.energyUsageSettings.autoplayVideo {
                             var willDownloadOrLocal = false
@@ -374,13 +376,15 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
                                 contentMediaAspectFilled = true
                             }
                         }
-                    } else if let _ = media as? TelegramMediaImage {
+                    } else if media is TelegramMediaImage {
                         contentMediaValue = media
-                    } else if let _ = media as? TelegramMediaWebFile {
+                    } else if media is TelegramMediaWebFile {
                         contentMediaValue = media
-                    } else if let _ = media as? WallpaperPreviewMedia {
+                    } else if media is WallpaperPreviewMedia {
                         contentMediaValue = media
-                    } else if let _ = media as? TelegramMediaStory {
+                    } else if media is TelegramMediaStory {
+                        contentMediaValue = media
+                    } else if media is UniqueGiftPreviewMedia {
                         contentMediaValue = media
                     }
                 }

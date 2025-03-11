@@ -1,4 +1,6 @@
 import Postbox
+import FlatBuffers
+import FlatSerialization
 
 public struct UserInfoFlags: OptionSet {
     public var rawValue: Int32
@@ -19,6 +21,7 @@ public struct UserInfoFlags: OptionSet {
     public static let isCloseFriend = UserInfoFlags(rawValue: (1 << 5))
     public static let requirePremium = UserInfoFlags(rawValue: (1 << 6))
     public static let mutualContact = UserInfoFlags(rawValue: (1 << 7))
+    public static let requireStars = UserInfoFlags(rawValue: (1 << 8))
 }
 
 public struct BotUserInfoFlags: OptionSet {
@@ -63,6 +66,22 @@ public struct BotUserInfo: PostboxCoding, Equatable {
             encoder.encodeNil(forKey: "ip")
         }
     }
+    
+    public init(flatBuffersObject: TelegramCore_BotUserInfo) throws {
+        self.flags = BotUserInfoFlags(rawValue: flatBuffersObject.flags)
+        self.inlinePlaceholder = flatBuffersObject.inlinePlaceholder
+    }
+    
+    public func encodeToFlatBuffers(builder: inout FlatBufferBuilder) -> Offset {
+        let inlinePlaceholderOffset = self.inlinePlaceholder.map { builder.create(string: $0) }
+        
+        let start = TelegramCore_BotUserInfo.startBotUserInfo(&builder)
+        TelegramCore_BotUserInfo.add(flags: self.flags.rawValue, &builder)
+        if let inlinePlaceholderOffset {
+            TelegramCore_BotUserInfo.add(inlinePlaceholder: inlinePlaceholderOffset, &builder)
+        }
+        return TelegramCore_BotUserInfo.endBotUserInfo(&builder, start: start)
+    }
 }
 
 public struct TelegramPeerUsername: PostboxCoding, Equatable {
@@ -98,6 +117,36 @@ public struct TelegramPeerUsername: PostboxCoding, Equatable {
         encoder.encodeInt32(self.flags.rawValue, forKey: "f")
         encoder.encodeString(self.username, forKey: "un")
     }
+    
+    public init(flatBuffersObject: TelegramCore_TelegramPeerUsername) throws {
+        self.flags = Flags(rawValue: flatBuffersObject.flags)
+        self.username = flatBuffersObject.username
+    }
+    
+    public func encodeToFlatBuffers(builder: inout FlatBufferBuilder) -> Offset {
+        let usernameOffset = builder.create(string: self.username)
+        
+        let start = TelegramCore_TelegramPeerUsername.startTelegramPeerUsername(&builder)
+        TelegramCore_TelegramPeerUsername.add(flags: self.flags.rawValue, &builder)
+        TelegramCore_TelegramPeerUsername.add(username: usernameOffset, &builder)
+        return TelegramCore_TelegramPeerUsername.endTelegramPeerUsername(&builder, start: start)
+    }
+}
+
+public struct PeerVerification: Codable, Equatable {
+    public let botId: PeerId
+    public let iconFileId: Int64
+    public let description: String
+    
+    public init(
+        botId: PeerId,
+        iconFileId: Int64,
+        description: String
+    ) {
+        self.botId = botId
+        self.iconFileId = iconFileId
+        self.description = description
+    }
 }
 
 public final class TelegramUser: Peer, Equatable {
@@ -119,6 +168,7 @@ public final class TelegramUser: Peer, Equatable {
     public let profileColor: PeerNameColor?
     public let profileBackgroundEmojiId: Int64?
     public let subscriberCount: Int32?
+    public let verificationIconFileId: Int64?
     
     public var nameOrPhone: String {
         if let firstName = self.firstName {
@@ -157,22 +207,26 @@ public final class TelegramUser: Peer, Equatable {
     }
     
     public var associatedMediaIds: [MediaId]? {
-        if let emojiStatus = self.emojiStatus, let backgroundEmojiId = self.backgroundEmojiId {
-            return [
-                MediaId(namespace: Namespaces.Media.CloudFile, id: emojiStatus.fileId),
-                MediaId(namespace: Namespaces.Media.CloudFile, id: backgroundEmojiId)
-            ]
-        } else if let emojiStatus = self.emojiStatus {
-            return [
-                MediaId(namespace: Namespaces.Media.CloudFile, id: emojiStatus.fileId)
-            ]
-        } else if let backgroundEmojiId = self.backgroundEmojiId {
-            return [
-                MediaId(namespace: Namespaces.Media.CloudFile, id: backgroundEmojiId)
-            ]
-        } else {
+        var mediaIds: [MediaId] = []
+        if let emojiStatus = self.emojiStatus {
+            switch emojiStatus.content {
+            case let .emoji(fileId):
+                mediaIds.append(MediaId(namespace: Namespaces.Media.CloudFile, id: fileId))
+            case let .starGift(_, fileId, _, _, patternFileId, _, _, _, _):
+                mediaIds.append(MediaId(namespace: Namespaces.Media.CloudFile, id: fileId))
+                mediaIds.append(MediaId(namespace: Namespaces.Media.CloudFile, id: patternFileId))
+            }
+        }
+        if let backgroundEmojiId = self.backgroundEmojiId {
+            mediaIds.append(MediaId(namespace: Namespaces.Media.CloudFile, id: backgroundEmojiId))
+        }
+        if let profileBackgroundEmojiId = self.profileBackgroundEmojiId {
+            mediaIds.append(MediaId(namespace: Namespaces.Media.CloudFile, id: profileBackgroundEmojiId))
+        }
+        guard !mediaIds.isEmpty else {
             return nil
         }
+        return mediaIds
     }
     
     public let associatedPeerId: PeerId? = nil
@@ -208,7 +262,8 @@ public final class TelegramUser: Peer, Equatable {
         backgroundEmojiId: Int64?,
         profileColor: PeerNameColor?,
         profileBackgroundEmojiId: Int64?,
-        subscriberCount: Int32?
+        subscriberCount: Int32?,
+        verificationIconFileId: Int64?
     ) {
         self.id = id
         self.accessHash = accessHash
@@ -228,6 +283,7 @@ public final class TelegramUser: Peer, Equatable {
         self.profileColor = profileColor
         self.profileBackgroundEmojiId = profileBackgroundEmojiId
         self.subscriberCount = subscriberCount
+        self.verificationIconFileId = verificationIconFileId
     }
     
     public init(decoder: PostboxDecoder) {
@@ -272,8 +328,19 @@ public final class TelegramUser: Peer, Equatable {
         self.backgroundEmojiId = decoder.decodeOptionalInt64ForKey("bgem")
         self.profileColor = decoder.decodeOptionalInt32ForKey("pclr").flatMap { PeerNameColor(rawValue: $0) }
         self.profileBackgroundEmojiId = decoder.decodeOptionalInt64ForKey("pgem")
-        
         self.subscriberCount = decoder.decodeOptionalInt32ForKey("ssc")
+        self.verificationIconFileId = decoder.decodeOptionalInt64ForKey("vfid")
+        
+        #if DEBUG
+        var builder = FlatBufferBuilder(initialSize: 1024)
+        let offset = self.encodeToFlatBuffers(builder: &builder)
+        builder.finish(offset: offset)
+        let serializedData = builder.data
+        var byteBuffer = ByteBuffer(data: serializedData)
+        let deserializedValue = FlatBuffers_getRoot(byteBuffer: &byteBuffer) as TelegramCore_TelegramUser
+        let parsedValue = try! TelegramUser(flatBuffersObject: deserializedValue)
+        assert(self == parsedValue)
+        #endif
     }
     
     public func encode(_ encoder: PostboxEncoder) {
@@ -363,6 +430,12 @@ public final class TelegramUser: Peer, Equatable {
         } else {
             encoder.encodeNil(forKey: "ssc")
         }
+        
+        if let verificationIconFileId = self.verificationIconFileId {
+            encoder.encodeInt64(verificationIconFileId, forKey: "vfid")
+        } else {
+            encoder.encodeNil(forKey: "vfid")
+        }
     }
     
     public func isEqual(_ other: Peer) -> Bool {
@@ -433,55 +506,148 @@ public final class TelegramUser: Peer, Equatable {
         if lhs.subscriberCount != rhs.subscriberCount {
             return false
         }
-        
+        if lhs.verificationIconFileId != rhs.verificationIconFileId {
+            return false
+        }
         return true
     }
     
     public func withUpdatedUsername(_ username: String?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedUsernames(_ usernames: [TelegramPeerUsername]) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedNames(firstName: String?, lastName: String?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: firstName, lastName: lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: firstName, lastName: lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedPhone(_ phone: String?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedPhoto(_ representations: [TelegramMediaImageRepresentation]) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: phone, photo: representations, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: phone, photo: representations, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedEmojiStatus(_ emojiStatus: PeerEmojiStatus?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedFlags(_ flags: UserInfoFlags) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedStoriesHidden(_ storiesHidden: Bool?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedNameColor(_ nameColor: PeerNameColor) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedBackgroundEmojiId(_ backgroundEmojiId: Int64?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedProfileColor(_ profileColor: PeerNameColor?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: profileColor, profileBackgroundEmojiId: self.profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
     }
     
     public func withUpdatedProfileBackgroundEmojiId(_ profileBackgroundEmojiId: Int64?) -> TelegramUser {
-        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: profileBackgroundEmojiId, subscriberCount: self.subscriberCount)
+        return TelegramUser(id: self.id, accessHash: self.accessHash, firstName: self.firstName, lastName: self.lastName, username: self.username, phone: self.phone, photo: self.photo, botInfo: self.botInfo, restrictionInfo: self.restrictionInfo, flags: self.flags, emojiStatus: self.emojiStatus, usernames: self.usernames, storiesHidden: self.storiesHidden, nameColor: self.nameColor, backgroundEmojiId: self.backgroundEmojiId, profileColor: self.profileColor, profileBackgroundEmojiId: profileBackgroundEmojiId, subscriberCount: self.subscriberCount, verificationIconFileId: self.verificationIconFileId)
+    }
+    
+    public init(flatBuffersObject: TelegramCore_TelegramUser) throws {
+        self.id = PeerId(flatBuffersObject.id)
+        self.accessHash = try flatBuffersObject.accessHash.flatMap(TelegramPeerAccessHash.init)
+        self.firstName = flatBuffersObject.firstName
+        self.lastName = flatBuffersObject.lastName
+        self.username = flatBuffersObject.username
+        self.phone = flatBuffersObject.phone
+        self.photo = try (0 ..< flatBuffersObject.photoCount).map { try TelegramMediaImageRepresentation(flatBuffersObject: flatBuffersObject.photo(at: $0)!) }
+        self.botInfo = try flatBuffersObject.botInfo.flatMap { try BotUserInfo(flatBuffersObject: $0) }
+        self.restrictionInfo = try flatBuffersObject.restrictionInfo.flatMap { try PeerAccessRestrictionInfo(flatBuffersObject: $0) }
+        self.flags = UserInfoFlags(rawValue: flatBuffersObject.flags)
+        self.emojiStatus = try flatBuffersObject.emojiStatus.flatMap { try PeerEmojiStatus(flatBuffersObject: $0) }
+        self.usernames = try (0 ..< flatBuffersObject.usernamesCount).map { try TelegramPeerUsername(flatBuffersObject: flatBuffersObject.usernames(at: $0)!) }
+        self.storiesHidden = flatBuffersObject.storiesHidden?.value
+        self.nameColor = try flatBuffersObject.nameColor.flatMap(PeerNameColor.init)
+        self.backgroundEmojiId = flatBuffersObject.backgroundEmojiId == Int64.min ? nil : flatBuffersObject.backgroundEmojiId
+        self.profileColor = try flatBuffersObject.profileColor.flatMap(PeerNameColor.init)
+        self.profileBackgroundEmojiId = flatBuffersObject.profileBackgroundEmojiId == Int64.min ? nil : flatBuffersObject.profileBackgroundEmojiId
+        self.subscriberCount = flatBuffersObject.subscriberCount == Int32.min ? nil : flatBuffersObject.subscriberCount
+        self.verificationIconFileId = flatBuffersObject.verificationIconFileId == Int64.min ? nil : flatBuffersObject.verificationIconFileId
+    }
+    
+    public func encodeToFlatBuffers(builder: inout FlatBufferBuilder) -> Offset {
+        let accessHashOffset = self.accessHash.flatMap { $0.encodeToFlatBuffers(builder: &builder) }
+        
+        let firstNameOffset = self.firstName.map { builder.create(string: $0) }
+        let lastNameOffset = self.lastName.map { builder.create(string: $0) }
+        let usernameOffset = self.username.map { builder.create(string: $0) }
+        let phoneOffset = self.phone.map { builder.create(string: $0) }
+        
+        let photoOffsets = self.photo.map { $0.encodeToFlatBuffers(builder: &builder) }
+        let photoOffset = builder.createVector(ofOffsets: photoOffsets, len: photoOffsets.count)
+        
+        let botInfoOffset = self.botInfo?.encodeToFlatBuffers(builder: &builder)
+        let restrictionInfoOffset = self.restrictionInfo?.encodeToFlatBuffers(builder: &builder)
+        
+        let usernamesOffsets = self.usernames.map { $0.encodeToFlatBuffers(builder: &builder) }
+        let usernamesOffset = builder.createVector(ofOffsets: usernamesOffsets, len: usernamesOffsets.count)
+        
+        let nameColorOffset = self.nameColor.flatMap { $0.encodeToFlatBuffers(builder: &builder) }
+        let profileColorOffset = self.profileColor.flatMap { $0.encodeToFlatBuffers(builder: &builder) }
+        let emojiStatusOffset = self.emojiStatus?.encodeToFlatBuffers(builder: &builder)
+        
+        let start = TelegramCore_TelegramUser.startTelegramUser(&builder)
+        
+        TelegramCore_TelegramUser.add(id: self.id.asFlatBuffersObject(), &builder)
+        if let accessHashOffset {
+            TelegramCore_TelegramUser.add(accessHash: accessHashOffset, &builder)
+        }
+        if let firstNameOffset {
+            TelegramCore_TelegramUser.add(firstName: firstNameOffset, &builder)
+        }
+        if let lastNameOffset {
+            TelegramCore_TelegramUser.add(lastName: lastNameOffset, &builder)
+        }
+        if let usernameOffset {
+            TelegramCore_TelegramUser.add(username: usernameOffset, &builder)
+        }
+        if let phoneOffset {
+            TelegramCore_TelegramUser.add(phone: phoneOffset, &builder)
+        }
+        TelegramCore_TelegramUser.addVectorOf(photo: photoOffset, &builder)
+        if let botInfoOffset {
+            TelegramCore_TelegramUser.add(botInfo: botInfoOffset, &builder)
+        }
+        if let restrictionInfoOffset {
+            TelegramCore_TelegramUser.add(restrictionInfo: restrictionInfoOffset, &builder)
+        }
+        TelegramCore_TelegramUser.add(flags: self.flags.rawValue, &builder)
+        if let emojiStatusOffset {
+            TelegramCore_TelegramUser.add(emojiStatus: emojiStatusOffset, &builder)
+        }
+        TelegramCore_TelegramUser.addVectorOf(usernames: usernamesOffset, &builder)
+        
+        if let storiesHidden = self.storiesHidden {
+            TelegramCore_TelegramUser.add(storiesHidden: TelegramCore_OptionalBool(value: storiesHidden), &builder)
+        }
+        if let nameColorOffset {
+            TelegramCore_TelegramUser.add(nameColor: nameColorOffset, &builder)
+        }
+        TelegramCore_TelegramUser.add(backgroundEmojiId: self.backgroundEmojiId ?? Int64.min, &builder)
+        if let profileColorOffset {
+            TelegramCore_TelegramUser.add(profileColor: profileColorOffset, &builder)
+        }
+        TelegramCore_TelegramUser.add(profileBackgroundEmojiId: self.profileBackgroundEmojiId ?? Int64.min, &builder)
+        TelegramCore_TelegramUser.add(subscriberCount: self.subscriberCount ?? Int32.min, &builder)
+        TelegramCore_TelegramUser.add(verificationIconFileId: self.verificationIconFileId ?? Int64.min, &builder)
+        
+        return TelegramCore_TelegramUser.endTelegramUser(&builder, start: start)
     }
 }

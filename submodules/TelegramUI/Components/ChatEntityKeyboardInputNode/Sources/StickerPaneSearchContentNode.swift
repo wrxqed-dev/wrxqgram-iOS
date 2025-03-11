@@ -10,7 +10,6 @@ import PresentationDataUtils
 import LegacyComponents
 import MergeLists
 import AccountContext
-import StickerPackPreviewUI
 import StickerPeekUI
 import Emoji
 import AppBundle
@@ -19,6 +18,7 @@ import UndoUI
 import ChatControllerInteraction
 import FeaturedStickersScreen
 import ChatPresentationInterfaceState
+import StickerResources
 
 private enum StickerSearchEntryId: Equatable, Hashable {
     case sticker(String?, Int64)
@@ -224,13 +224,25 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
                 
                 let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }.withUpdated(theme: theme)
                 
-                let controller = StickerPackScreen(context: strongSelf.context, updatedPresentationData: (presentationData, .single(presentationData)), mainStickerPack: packReference, stickerPacks: [packReference], actionTitle: stickerActionTitle, parentNavigationController: strongSelf.interaction.getNavigationController(), sendSticker: { [weak self] fileReference, sourceNode, sourceRect in
-                    if let strongSelf = self {
-                        return strongSelf.interaction.sendSticker(fileReference, false, false, nil, false, sourceNode, sourceRect, nil, [])
-                    } else {
-                        return false
-                    }
-                })
+                let controller = strongSelf.context.sharedContext.makeStickerPackScreen(
+                    context: strongSelf.context,
+                    updatedPresentationData: (presentationData, .single(presentationData)),
+                    mainStickerPack: packReference,
+                    stickerPacks: [packReference],
+                    loadedStickerPacks: [],
+                    actionTitle: stickerActionTitle,
+                    isEditing: false,
+                    expandIfNeeded: false,
+                    parentNavigationController: strongSelf.interaction.getNavigationController(),
+                    sendSticker: { [weak self] fileReference, sourceView, sourceRect in
+                        if let strongSelf = self {
+                            return strongSelf.interaction.sendSticker(fileReference, false, false, nil, false, sourceView, sourceRect, nil, [])
+                        } else {
+                            return false
+                        }
+                    },
+                    actionPerformed: nil
+                )
                 strongSelf.interaction.presentController(controller, nil)
             }
         }, install: { [weak self] info, items, install in
@@ -343,13 +355,13 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
         let signal: Signal<([(String?, FoundStickerItem)], FoundStickerSets, Bool, FoundStickerSets?)?, NoError>
         if !text.isEmpty {
             let context = self.context
-            let stickers: Signal<[(String?, FoundStickerItem)], NoError> = Signal { subscriber in
-                var signals: Signal<[Signal<(String?, [FoundStickerItem]), NoError>], NoError> = .single([])
+            let stickers: Signal<([(String?, FoundStickerItem)], Bool), NoError> = Signal { subscriber in
+                var signals: Signal<[Signal<(String?, [FoundStickerItem], Bool), NoError>], NoError> = .single([])
                 
                 let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if query.isSingleEmoji {
                     signals = .single([context.engine.stickers.searchStickers(query: nil, emoticon: [text.basicEmoji.0])
-                    |> map { (nil, $0.items) }])
+                    |> map { (nil, $0.items, $0.isFinalResult) }])
                 } else if query.count > 1, let languageCode = languageCode, !languageCode.isEmpty && languageCode != "emoji" {
                     var signal = context.engine.stickers.searchEmojiKeywords(inputLanguageCode: languageCode, query: query.lowercased(), completeMatch: query.count < 3)
                     if !languageCode.lowercased().hasPrefix("en") {
@@ -365,10 +377,10 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
                         }
                     }
                     signals = signal
-                    |> map { keywords -> [Signal<(String?, [FoundStickerItem]), NoError>] in
+                    |> map { keywords -> [Signal<(String?, [FoundStickerItem], Bool), NoError>] in
                         let emoticon = keywords.flatMap { $0.emoticons }.map { $0.basicEmoji.0 }
                         return [context.engine.stickers.searchStickers(query: query, emoticon: emoticon, inputLanguageCode: languageCode)
-                        |> map { (nil, $0.items) }]
+                        |> map { (nil, $0.items, $0.isFinalResult) }]
                     }
                 }
                 
@@ -377,12 +389,16 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
                     return combineLatest(signals)
                 }).start(next: { results in
                     var result: [(String?, FoundStickerItem)] = []
-                    for (emoji, stickers) in results {
+                    var allAreFinal = true
+                    for (emoji, stickers, isFinal) in results {
                         for sticker in stickers {
                             result.append((emoji, sticker))
                         }
+                        if !isFinal {
+                            allAreFinal = false
+                        }
                     }
-                    subscriber.putNext(result)
+                    subscriber.putNext((result, allAreFinal))
                 }, completed: {
 //                    subscriber.putCompletion()
                 })
@@ -444,7 +460,7 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
             
             signal = combineLatest(stickers, packs)
             |> map { stickers, packs -> ([(String?, FoundStickerItem)], FoundStickerSets, Bool, FoundStickerSets?)? in
-                return (stickers, packs.0, packs.1, packs.2)
+                return (stickers.0, packs.0, packs.1 && stickers.1, packs.2)
             }
             self.updateActivity?(true)
         } else {
@@ -556,7 +572,7 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
     func itemAt(point: CGPoint) -> (ASDisplayNode, Any)? {
         if !self.trendingPane.isHidden {
             if let (itemNode, item) = self.trendingPane.itemAt(point: self.view.convert(point, to: self.trendingPane.view)) {
-                return (itemNode, StickerPreviewPeekItem.pack(item.file))
+                return (itemNode, StickerPreviewPeekItem.pack(item.file._parse()))
             }
         } else {
             if let itemNode = self.gridNode.itemNodeAtPoint(self.view.convert(point, to: self.gridNode.view)) {
@@ -564,7 +580,7 @@ final class StickerPaneSearchContentNode: ASDisplayNode, PaneSearchContentNode {
                     return (itemNode, StickerPreviewPeekItem.found(stickerItem))
                 } else if let itemNode = itemNode as? StickerPaneSearchGlobalItemNode {
                     if let (node, item) = itemNode.itemAt(point: self.view.convert(point, to: itemNode.view)) {
-                        return (node, StickerPreviewPeekItem.pack(item.file))
+                        return (node, StickerPreviewPeekItem.pack(item.file._parse()))
                     }
                 }
             }

@@ -19,7 +19,6 @@ import TelegramStringFormatting
 import PlainButtonComponent
 import BlurredBackgroundComponent
 import PremiumStarComponent
-import ConfettiEffect
 import TextFormat
 import GiftItemComponent
 import InAppPurchaseManager
@@ -79,7 +78,9 @@ final class GiftOptionsScreenComponent: Component {
     public enum StarsFilter: Equatable {
         case all
         case limited
+        case inStock
         case stars(Int64)
+        case transfer
         
         init(rawValue: Int64) {
             switch rawValue {
@@ -87,6 +88,10 @@ final class GiftOptionsScreenComponent: Component {
                 self = .all
             case -1:
                 self = .limited
+            case -2:
+                self = .inStock
+            case -3:
+                self = .transfer
             default:
                 self = .stars(rawValue)
             }
@@ -98,6 +103,10 @@ final class GiftOptionsScreenComponent: Component {
                 return 0
             case .limited:
                 return -1
+            case .inStock:
+                return -2
+            case .transfer:
+                return -3
             case let .stars(stars):
                 return stars
             }
@@ -136,38 +145,66 @@ final class GiftOptionsScreenComponent: Component {
                 if let (currentGifts, currentFilter) = self._effectiveStarGifts, currentFilter == self.starsFilter {
                     return currentGifts
                 } else if let allGifts = self.state?.starGifts {
-                    var sortedGifts = allGifts
-                    if self.component?.hasBirthday == true {
-                        var updatedGifts: [StarGift] = []
-                        for gift in allGifts {
-                            if gift.flags.contains(.isBirthdayGift) {
-                                updatedGifts.append(gift)
+                    if case .transfer = self.starsFilter {
+                        let filteredGifts: [StarGift] = self.state?.transferStarGifts?.compactMap { gift in
+                            if case .unique = gift.gift {
+                                return gift.gift
+                            } else {
+                                return nil
                             }
-                        }
-                        for gift in allGifts {
-                            if !gift.flags.contains(.isBirthdayGift) {
-                                updatedGifts.append(gift)
+                        } ?? []
+                        self._effectiveStarGifts = (filteredGifts, self.starsFilter)
+                        return filteredGifts
+                    } else {
+                        var sortedGifts = allGifts
+                        if self.component?.hasBirthday == true {
+                            var updatedGifts: [StarGift] = []
+                            for starGift in allGifts {
+                                if case let .generic(gift) = starGift {
+                                    if gift.flags.contains(.isBirthdayGift) {
+                                        updatedGifts.append(starGift)
+                                    }
+                                }
                             }
+                            for starGift in allGifts {
+                                if case let .generic(gift) = starGift {
+                                    if !gift.flags.contains(.isBirthdayGift) {
+                                        updatedGifts.append(starGift)
+                                    }
+                                }
+                            }
+                            sortedGifts = updatedGifts
                         }
-                        sortedGifts = updatedGifts
-                    }
-                    let filteredGifts: [StarGift] = sortedGifts.filter {
-                        switch self.starsFilter {
-                        case .all:
-                            return true
-                        case .limited:
-                            if $0.availability != nil {
+                        let filteredGifts: [StarGift] = sortedGifts.filter {
+                            switch self.starsFilter {
+                            case .all:
                                 return true
+                            case .limited:
+                                if case let .generic(gift) = $0 {
+                                    if gift.availability != nil {
+                                        return true
+                                    }
+                                }
+                            case .inStock:
+                                if case let .generic(gift) = $0 {
+                                    if gift.availability == nil || gift.availability!.remains > 0 {
+                                        return true
+                                    }
+                                }
+                            case let .stars(stars):
+                                if case let .generic(gift) = $0 {
+                                    if gift.price == stars {
+                                        return true
+                                    }
+                                }
+                            case .transfer:
+                                break
                             }
-                        case let .stars(stars):
-                            if $0.price == stars {
-                                return true
-                            }
+                            return false
                         }
-                        return false
+                        self._effectiveStarGifts = (filteredGifts, self.starsFilter)
+                        return filteredGifts
                     }
-                    self._effectiveStarGifts = (filteredGifts, self.starsFilter)
-                    return filteredGifts
                 } else {
                     return nil
                 }
@@ -267,7 +304,7 @@ final class GiftOptionsScreenComponent: Component {
             
             let starsTitleOffset: CGFloat
             let starsTitleFraction: CGFloat
-            if contentOffset > 350 {
+            if contentOffset > 350, self.starsTitle.view != nil {
                 starsTitleOffset = contentOffset + max(0.0, min(1.0, (contentOffset - 350.0) / starsTitleOffsetDelta)) * 10.0
                 starsTitleFraction = max(0.0, min(1.0, (starsTitleOffset - 350.0) / starsTitleOffsetDelta))
                 if contentOffset > 380.0 {
@@ -333,16 +370,28 @@ final class GiftOptionsScreenComponent: Component {
                         }
                         
                         var ribbon: GiftItemComponent.Ribbon?
-                        if let _ = gift.soldOut {
-                            ribbon = GiftItemComponent.Ribbon(
-                                text: environment.strings.Gift_Options_Gift_SoldOut,
-                                color: .red
-                            )
-                        } else if let _ = gift.availability {
-                            ribbon = GiftItemComponent.Ribbon(
-                                text: environment.strings.Gift_Options_Gift_Limited,
-                                color: .blue
-                            )
+                        var isSoldOut = false
+                        if case let .generic(gift) = gift {
+                            if let _ = gift.soldOut {
+                                ribbon = GiftItemComponent.Ribbon(
+                                    text: environment.strings.Gift_Options_Gift_SoldOut,
+                                    color: .red
+                                )
+                                isSoldOut = true
+                            } else if let _ = gift.availability {
+                                ribbon = GiftItemComponent.Ribbon(
+                                    text: environment.strings.Gift_Options_Gift_Limited,
+                                    color: .blue
+                                )
+                            }
+                        }
+                        
+                        let subject: GiftItemComponent.Subject
+                        switch gift {
+                        case let .generic(gift):
+                            subject = .starGift(gift: gift, price: "⭐️ \(gift.price)")
+                        case let .unique(gift):
+                            subject = .uniqueGift(gift: gift)
                         }
                         
                         let _ = visibleItem.update(
@@ -353,11 +402,11 @@ final class GiftOptionsScreenComponent: Component {
                                         GiftItemComponent(
                                             context: component.context,
                                             theme: environment.theme,
+                                            strings: environment.strings,
                                             peer: nil,
-                                            subject: .starGift(gift.id, gift.file),
-                                            price: "⭐️ \(gift.price)",
+                                            subject: subject,
                                             ribbon: ribbon,
-                                            isSoldOut: gift.soldOut != nil
+                                            isSoldOut: isSoldOut
                                         )
                                     ),
                                     effectAlignment: .center,
@@ -370,22 +419,25 @@ final class GiftOptionsScreenComponent: Component {
                                                 } else {
                                                     mainController = controller
                                                 }
-                                                if gift.availability?.remains == 0 {
-                                                    let giftController = GiftViewScreen(
-                                                        context: component.context,
-                                                        subject: .soldOutGift(gift)
-                                                    )
-                                                    mainController.push(giftController)
-                                                } else {
-                                                    let giftController = GiftSetupScreen(
-                                                        context: component.context,
-                                                        peerId: component.peerId,
-                                                        subject: .starGift(gift),
-                                                        completion: component.completion
-                                                    )
-                                                    mainController.push(giftController)
+                                                if case let .generic(gift) = gift {
+                                                    if gift.availability?.remains == 0 {
+                                                        let giftController = GiftViewScreen(
+                                                            context: component.context,
+                                                            subject: .soldOutGift(gift)
+                                                        )
+                                                        mainController.push(giftController)
+                                                    } else {
+                                                        let giftController = GiftSetupScreen(
+                                                            context: component.context,
+                                                            peerId: component.peerId,
+                                                            subject: .starGift(gift),
+                                                            completion: component.completion
+                                                        )
+                                                        mainController.push(giftController)
+                                                    }
+                                                } else if case let .unique(gift) = gift {
+                                                    self.transferGift(gift)
                                                 }
-                                               
                                             }
                                         }
                                     },
@@ -435,6 +487,86 @@ final class GiftOptionsScreenComponent: Component {
             }
         }
         
+        func transferGift(_ transferGift: StarGift.UniqueGift) {
+            guard let component = self.component, let environment = self.environment, let peer = self.state?.peer, let controller = environment.controller() else {
+                return
+            }
+            
+            guard let gift = self.state?.transferStarGifts?.first(where: { gift in
+                if case let .unique(gift) = gift.gift, gift.slug == transferGift.slug {
+                    return true
+                } else {
+                    return false
+                }
+            }), let reference = gift.reference else {
+                return
+            }
+            
+            let context = component.context
+            let alertController = giftTransferAlertController(
+                context: context,
+                gift: transferGift,
+                peer: peer,
+                transferStars: gift.transferStars ?? 0,
+                commit: { [weak controller] in
+                    let _ = (context.engine.payments.transferStarGift(prepaid: gift.transferStars == 0, reference: reference, peerId: peer.id)
+                    |> deliverOnMainQueue).start()
+                    
+                    guard let controller, let navigationController = controller.navigationController as? NavigationController else {
+                        return
+                    }
+                     
+                    if peer.id.namespace == Namespaces.Peer.CloudChannel {
+                        var controllers = navigationController.viewControllers
+                        controllers = controllers.filter { !($0 is GiftSetupScreen) && !($0 is GiftOptionsScreenProtocol) }
+                        var foundController = false
+                        for controller in controllers.reversed() {
+                            if let controller = controller as? PeerInfoScreen, controller.peerId == component.peerId {
+                                foundController = true
+                                break
+                            }
+                        }
+                        if !foundController {
+                            if let controller = context.sharedContext.makePeerInfoController(
+                                context: context,
+                                updatedPresentationData: nil,
+                                peer: peer._asPeer(),
+                                mode: .gifts,
+                                avatarInitiallyExpanded: false,
+                                fromChat: false,
+                                requestsContext: nil
+                            ) {
+                                controllers.append(controller)
+                            }
+                        }
+                        navigationController.setViewControllers(controllers, animated: true)
+                    } else {
+                        var controllers = navigationController.viewControllers
+                        controllers = controllers.filter { !($0 is GiftSetupScreen) && !($0 is GiftOptionsScreenProtocol) && !($0 is PeerInfoScreen) && !($0 is ContactSelectionController) }
+                        var foundController = false
+                        for controller in controllers.reversed() {
+                            if let chatController = controller as? ChatController, case .peer(id: component.peerId) = chatController.chatLocation {
+                                chatController.hintPlayNextOutgoingGift()
+                                foundController = true
+                                break
+                            }
+                        }
+                        if !foundController {
+                            let chatController = component.context.sharedContext.makeChatController(context: component.context, chatLocation: .peer(id: component.peerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil)
+                            chatController.hintPlayNextOutgoingGift()
+                            controllers.append(chatController)
+                        }
+                        navigationController.setViewControllers(controllers, animated: true)
+                    }
+                
+                    if let completion = component.completion {
+                        completion()
+                    }
+                }
+            )
+            controller.present(alertController, in: .window(.root))
+        }
+        
         func update(component: GiftOptionsScreenComponent, availableSize: CGSize, state: State, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.isUpdating = true
             defer {
@@ -477,9 +609,16 @@ final class GiftOptionsScreenComponent: Component {
             let bottomContentInset: CGFloat = 24.0
             let sideInset: CGFloat = 16.0 + environment.safeInsets.left
             let sectionSpacing: CGFloat = 24.0
+            let headerSideInset: CGFloat = 24.0 + environment.safeInsets.left
             
             let _ = bottomContentInset
             let _ = sectionSpacing
+            
+            let premiumConfiguration = PremiumConfiguration.with(appConfiguration: component.context.currentAppConfiguration.with { $0 })
+            
+            let isPremiumDisabled = premiumConfiguration.isPremiumDisabled
+            let isSelfGift = component.peerId == component.context.account.peerId
+            let isChannelGift = component.peerId.namespace == Namespaces.Peer.CloudChannel
             
             var contentHeight: CGFloat = 0.0
             contentHeight += environment.navigationHeight - 56.0 + 188.0
@@ -494,7 +633,21 @@ final class GiftOptionsScreenComponent: Component {
                         isVisible: true,
                         hasIdleAnimations: true,
                         color: UIColor(rgb: 0xf9b004),
-                        hasLargeParticles: true
+                        hasLargeParticles: true,
+                        action: { [weak self] in
+                            guard let self, let component = self.component, let controller = controller(), let navigationController = controller.navigationController as? NavigationController else {
+                                return
+                            }
+                            let _ = (component.context.engine.data.get(
+                                TelegramEngine.EngineData.Item.Peer.Peer(id: component.peerId)
+                            )
+                            |> deliverOnMainQueue).start(next: { peer in
+                                guard let peer else {
+                                    return
+                                }
+                                component.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, chatController: nil, context: component.context, chatLocation: .peer(peer), subject: nil, botStart: nil, updateTextInputState: nil, keepStack: .always, useExisting: true, purposefulAction: nil, scrollToEndIfExists: false, activateMessageSearch: nil, animated: true))
+                            })
+                        }
                     )
                 ),
                 environment: {},
@@ -576,14 +729,16 @@ final class GiftOptionsScreenComponent: Component {
                 environment: {},
                 containerSize: availableSize
             )
+            
+            let formattedBalance = formatStarsAmountText(self.starsState?.balance ?? StarsAmount.zero, dateTimeFormat: environment.dateTimeFormat)
+            let smallLabelFont = Font.regular(11.0)
+            let labelFont = Font.semibold(14.0)
+            let balanceText = tonAmountAttributedString(formattedBalance, integralFont: labelFont, fractionalFont: smallLabelFont, color: environment.theme.actionSheet.primaryTextColor, decimalSeparator: environment.dateTimeFormat.decimalSeparator)
+            
             let balanceValueSize = self.balanceValue.update(
                 transition: .immediate,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(
-                        string: presentationStringsFormattedNumber(self.starsState?.balance ?? StarsAmount.zero, environment.dateTimeFormat.groupingSeparator),
-                        font: Font.semibold(14.0),
-                        textColor: environment.theme.actionSheet.primaryTextColor
-                    )),
+                    text: .plain(balanceText),
                     maximumNumberOfLines: 1
                 )),
                 environment: {},
@@ -612,14 +767,24 @@ final class GiftOptionsScreenComponent: Component {
                 balanceIconView.bounds = CGRect(origin: .zero, size: balanceIconSize)
             }
             
+            let premiumTitleString: String
+            if isSelfGift {
+                premiumTitleString = strings.Gift_Options_GiftSelf_Title
+            } else if isChannelGift {
+                premiumTitleString = strings.Gift_Options_GiftChannel_Title
+            } else if isPremiumDisabled {
+                premiumTitleString = strings.Gift_Options_Gift_Title
+            } else {
+                premiumTitleString = strings.Gift_Options_Premium_Title
+            }
             let premiumTitleSize = self.premiumTitle.update(
                 transition: transition,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: strings.Gift_Options_Premium_Title, font: Font.bold(28.0), textColor: theme.rootController.navigationBar.primaryTextColor)),
+                    text: .plain(NSAttributedString(string: premiumTitleString, font: Font.bold(28.0), textColor: theme.rootController.navigationBar.primaryTextColor)),
                     horizontalAlignment: .center
                 )),
                 environment: {},
-                containerSize: CGSize(width: availableSize.width, height: 100.0)
+                containerSize: CGSize(width: availableSize.width - headerSideInset * 2.0, height: 100.0)
             )
             if let premiumTitleView = self.premiumTitle.view {
                 if premiumTitleView.superview == nil {
@@ -636,7 +801,17 @@ final class GiftOptionsScreenComponent: Component {
             })
             let peerName = state.peer?.compactDisplayTitle ?? ""
             
-            let premiumDescriptionString = parseMarkdownIntoAttributedString(strings.Gift_Options_Premium_Text(peerName).string, attributes: markdownAttributes).mutableCopy() as! NSMutableAttributedString
+            let premiumDescriptionRawString: String
+            if isSelfGift {
+                premiumDescriptionRawString = strings.Gift_Options_GiftSelf_Text
+            } else if isChannelGift {
+                premiumDescriptionRawString = strings.Gift_Options_GiftChannel_Text(peerName).string
+            } else if isPremiumDisabled {
+                premiumDescriptionRawString = strings.Gift_Options_Gift_Text(peerName).string
+            } else {
+                premiumDescriptionRawString = strings.Gift_Options_Premium_Text(peerName).string
+            }
+            let premiumDescriptionString = parseMarkdownIntoAttributedString(premiumDescriptionRawString, attributes: markdownAttributes).mutableCopy() as! NSMutableAttributedString
             if let range = premiumDescriptionString.string.range(of: ">"), let chevronImage = self.chevronImage?.0 {
                 premiumDescriptionString.addAttribute(.attachment, value: chevronImage, range: NSRange(range, in: premiumDescriptionString.string))
             }
@@ -660,9 +835,13 @@ final class GiftOptionsScreenComponent: Component {
                         guard let self, let component = self.component, let environment = self.environment else {
                             return
                         }
-                        let introController = component.context.sharedContext.makePremiumIntroController(context: component.context, source: .settings, forceDark: false, dismissed: nil)
-                        introController.navigationPresentation = .modal
-                        
+                        let introController: ViewController
+                        if isPremiumDisabled {
+                            introController = component.context.sharedContext.makeStarsIntroScreen(context: component.context)
+                        } else {
+                            introController = component.context.sharedContext.makePremiumIntroController(context: component.context, source: .settings, forceDark: false, dismissed: nil)
+                            introController.navigationPresentation = .modal
+                        }
                         if let controller = environment.controller() as? GiftOptionsScreen {
                             let mainController: ViewController
                             if let parentController = controller.parentController() {
@@ -675,7 +854,7 @@ final class GiftOptionsScreenComponent: Component {
                     }
                 )),
                 environment: {},
-                containerSize: CGSize(width: availableSize.width, height: 1000.0)
+                containerSize: CGSize(width: availableSize.width - headerSideInset * 2.0, height: 1000.0)
             )
             let premiumDescriptionFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - premiumDescriptionSize.width) / 2.0), y: contentHeight), size: premiumDescriptionSize)
             if let premiumDescriptionView = self.premiumDescription.view {
@@ -690,189 +869,199 @@ final class GiftOptionsScreenComponent: Component {
             let optionSpacing: CGFloat = 10.0
             let optionWidth = (availableSize.width - sideInset * 2.0 - optionSpacing * 2.0) / 3.0
             
-            if let premiumProducts = state.premiumProducts {
-                let premiumOptionSize = CGSize(width: optionWidth, height: 178.0)
-                
-                var validIds: [AnyHashable] = []
-                var itemFrame = CGRect(origin: CGPoint(x: sideInset, y: contentHeight), size: premiumOptionSize)
-                for product in premiumProducts {
-                    let itemId = AnyHashable(product.id)
-                    validIds.append(itemId)
-                    
-                    var itemTransition = transition
-                    let visibleItem: ComponentView<Empty>
-                    if let current = self.premiumItems[itemId] {
-                        visibleItem = current
-                    } else {
-                        visibleItem = ComponentView()
-                        if !transition.animation.isImmediate {
-                            itemTransition = .immediate
-                        }
-                        self.premiumItems[itemId] = visibleItem
-                    }
-                    
-                    let title: String
-                    switch product.months {
-                    case 6:
-                        title = strings.Gift_Options_Premium_Months(6)
-                    case 12:
-                        title = strings.Gift_Options_Premium_Years(1)
-                    default:
-                        title = strings.Gift_Options_Premium_Months(3)
-                    }
-
-                    let _ = visibleItem.update(
-                        transition: itemTransition,
-                        component: AnyComponent(
-                            PlainButtonComponent(
-                                content: AnyComponent(
-                                    GiftItemComponent(
-                                        context: component.context,
-                                        theme: theme,
-                                        peer: nil,
-                                        subject: .premium(product.months),
-                                        title: title,
-                                        subtitle: strings.Gift_Options_Premium_Premium,
-                                        price: product.price,
-                                        ribbon: product.discount.flatMap {
-                                            GiftItemComponent.Ribbon(
-                                                text:  "-\($0)%",
-                                                color: .red
-                                            )
-                                        },
-                                        isLoading: self.inProgressPremiumGift == product.id
-                                    )
-                                ),
-                                effectAlignment: .center,
-                                action: { [weak self] in
-                                    if let self, let component = self.component {
-                                        if let controller = controller() as? GiftOptionsScreen {
-                                            let mainController: ViewController
-                                            if let parentController = controller.parentController() {
-                                                mainController = parentController
-                                            } else {
-                                                mainController = controller
-                                            }
-                                            let giftController = GiftSetupScreen(
-                                                context: component.context,
-                                                peerId: component.peerId,
-                                                subject: .premium(product),
-                                                completion: component.completion
-                                            )
-                                            mainController.push(giftController)
-                                        }
-                                    }
-                                },
-                                animateAlpha: false
-                            )
-                        ),
-                        environment: {},
-                        containerSize: premiumOptionSize
-                    )
-                    if let itemView = visibleItem.view {
-                        if itemView.superview == nil {
-                            self.scrollView.addSubview(itemView)
-                            if !transition.animation.isImmediate {
-                                transition.animateAlpha(view: itemView, from: 0.0, to: 1.0)
-                            }
-                        }
-                        itemTransition.setFrame(view: itemView, frame: itemFrame)
-                    }
-                    itemFrame.origin.x += itemFrame.width + optionSpacing
-                    if itemFrame.maxX > availableSize.width {
-                        itemFrame.origin.x = sideInset
-                        itemFrame.origin.y += premiumOptionSize.height + optionSpacing
-                    }
-                }
-                
-                var removeIds: [AnyHashable] = []
-                for (id, item) in self.premiumItems {
-                    if !validIds.contains(id) {
-                        removeIds.append(id)
-                        if let itemView = item.view {
-                            if !transition.animation.isImmediate {
-                                itemView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.25, removeOnCompletion: false, completion: { _ in
-                                    itemView.removeFromSuperview()
-                                })
-                            } else {
-                                itemView.removeFromSuperview()
-                            }
-                        }
-                    }
-                }
-                for id in removeIds {
-                    self.premiumItems.removeValue(forKey: id)
-                }
-                
-                contentHeight += ceil(CGFloat(premiumProducts.count) / 3.0) * premiumOptionSize.height
-                contentHeight += 66.0
-            }
-
+            let showStarPrice = (self.starsState?.balance.value ?? 0) > 10
             
-            let starsTitleSize = self.starsTitle.update(
-                transition: transition,
-                component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: strings.Gift_Options_Gift_Title, font: Font.bold(28.0), textColor: theme.rootController.navigationBar.primaryTextColor)),
-                    horizontalAlignment: .center
-                )),
-                environment: {},
-                containerSize: CGSize(width: availableSize.width, height: 100.0)
-            )
-            if let starsTitleView = self.starsTitle.view {
-                if starsTitleView.superview == nil {
-                    self.addSubview(starsTitleView)
-                }
-                transition.setBounds(view: starsTitleView, bounds: CGRect(origin: .zero, size: starsTitleSize))
-            }
-            
-            let starsDescriptionString = parseMarkdownIntoAttributedString(strings.Gift_Options_Gift_Text(peerName).string, attributes: markdownAttributes).mutableCopy() as! NSMutableAttributedString
-            if let range = starsDescriptionString.string.range(of: ">"), let chevronImage = self.chevronImage?.0 {
-                starsDescriptionString.addAttribute(.attachment, value: chevronImage, range: NSRange(range, in: starsDescriptionString.string))
-            }
-            let starsDescriptionSize = self.starsDescription.update(
-                transition: transition,
-                component: AnyComponent(BalancedTextComponent(
-                    text: .plain(starsDescriptionString),
-                    horizontalAlignment: .center,
-                    maximumNumberOfLines: 0,
-                    lineSpacing: 0.2,
-                    highlightColor: accentColor.withAlphaComponent(0.1),
-                    highlightInset: UIEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: -8.0),
-                    highlightAction: { attributes in
-                        if let _ = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)] {
-                            return NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)
+            if isSelfGift || isChannelGift || isPremiumDisabled {
+                contentHeight += 6.0
+            } else {
+                if let premiumProducts = state.premiumProducts {
+                    var premiumOptionSize = CGSize(width: optionWidth, height: 178.0)
+                    
+                    var validIds: [AnyHashable] = []
+                    var itemFrame = CGRect(origin: CGPoint(x: sideInset, y: contentHeight), size: premiumOptionSize)
+                    for product in premiumProducts {
+                        if let _ = product.starsPrice {
+                            premiumOptionSize.height = 178.0 + 23.0
+                        }
+                        
+                        let itemId = AnyHashable(product.id)
+                        validIds.append(itemId)
+                        
+                        var itemTransition = transition
+                        let visibleItem: ComponentView<Empty>
+                        if let current = self.premiumItems[itemId] {
+                            visibleItem = current
                         } else {
-                            return nil
-                        }
-                    },
-                    tapAction: { [weak self] _, _ in
-                        guard let self, let component = self.component, let environment = self.environment else {
-                            return
-                        }
-                        let introController = component.context.sharedContext.makeStarsIntroScreen(context: component.context)                        
-                        if let controller = environment.controller() as? GiftOptionsScreen {
-                            let mainController: ViewController
-                            if let parentController = controller.parentController() {
-                                mainController = parentController
-                            } else {
-                                mainController = controller
+                            visibleItem = ComponentView()
+                            if !transition.animation.isImmediate {
+                                itemTransition = .immediate
                             }
-                            mainController.push(introController)
+                            self.premiumItems[itemId] = visibleItem
+                        }
+                        
+                        let title: String
+                        switch product.months {
+                        case 6:
+                            title = strings.Gift_Options_Premium_Months(6)
+                        case 12:
+                            title = strings.Gift_Options_Premium_Years(1)
+                        default:
+                            title = strings.Gift_Options_Premium_Months(3)
+                        }
+                        
+                        let _ = visibleItem.update(
+                            transition: itemTransition,
+                            component: AnyComponent(
+                                PlainButtonComponent(
+                                    content: AnyComponent(
+                                        GiftItemComponent(
+                                            context: component.context,
+                                            theme: theme,
+                                            strings: environment.strings,
+                                            peer: nil,
+                                            subject: .premium(months: product.months, price: product.price),
+                                            title: title,
+                                            subtitle: strings.Gift_Options_Premium_Premium,
+                                            label: showStarPrice ? product.starsPrice.flatMap { strings.Gift_Options_Premium_OrStars("**#\(presentationStringsFormattedNumber(Int32($0), environment.dateTimeFormat.groupingSeparator))**").string } : nil,
+                                            ribbon: product.discount.flatMap {
+                                                GiftItemComponent.Ribbon(
+                                                    text:  "-\($0)%",
+                                                    color: .purple
+                                                )
+                                            },
+                                            isLoading: self.inProgressPremiumGift == product.id
+                                        )
+                                    ),
+                                    effectAlignment: .center,
+                                    action: { [weak self] in
+                                        if let self, let component = self.component {
+                                            if let controller = controller() as? GiftOptionsScreen {
+                                                let mainController: ViewController
+                                                if let parentController = controller.parentController() {
+                                                    mainController = parentController
+                                                } else {
+                                                    mainController = controller
+                                                }
+                                                let giftController = GiftSetupScreen(
+                                                    context: component.context,
+                                                    peerId: component.peerId,
+                                                    subject: .premium(product),
+                                                    completion: component.completion
+                                                )
+                                                mainController.push(giftController)
+                                            }
+                                        }
+                                    },
+                                    animateAlpha: false
+                                )
+                            ),
+                            environment: {},
+                            containerSize: premiumOptionSize
+                        )
+                        if let itemView = visibleItem.view {
+                            if itemView.superview == nil {
+                                self.scrollView.addSubview(itemView)
+                                if !transition.animation.isImmediate {
+                                    transition.animateAlpha(view: itemView, from: 0.0, to: 1.0)
+                                }
+                            }
+                            itemTransition.setFrame(view: itemView, frame: itemFrame)
+                        }
+                        itemFrame.origin.x += itemFrame.width + optionSpacing
+                        if itemFrame.maxX > availableSize.width {
+                            itemFrame.origin.x = sideInset
+                            itemFrame.origin.y += premiumOptionSize.height + optionSpacing
                         }
                     }
-                )),
-                environment: {},
-                containerSize: CGSize(width: availableSize.width, height: 1000.0)
-            )
-            let starsDescriptionFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - starsDescriptionSize.width) / 2.0), y: contentHeight), size: starsDescriptionSize)
-            if let starsDescriptionView = self.starsDescription.view {
-                if starsDescriptionView.superview == nil {
-                    self.scrollView.addSubview(starsDescriptionView)
+                    
+                    var removeIds: [AnyHashable] = []
+                    for (id, item) in self.premiumItems {
+                        if !validIds.contains(id) {
+                            removeIds.append(id)
+                            if let itemView = item.view {
+                                if !transition.animation.isImmediate {
+                                    itemView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.25, removeOnCompletion: false, completion: { _ in
+                                        itemView.removeFromSuperview()
+                                    })
+                                } else {
+                                    itemView.removeFromSuperview()
+                                }
+                            }
+                        }
+                    }
+                    for id in removeIds {
+                        self.premiumItems.removeValue(forKey: id)
+                    }
+                    
+                    contentHeight += ceil(CGFloat(premiumProducts.count) / 3.0) * premiumOptionSize.height
+                    contentHeight += 66.0
                 }
-                transition.setFrame(view: starsDescriptionView, frame: starsDescriptionFrame)
+                
+                let starsTitleSize = self.starsTitle.update(
+                    transition: transition,
+                    component: AnyComponent(MultilineTextComponent(
+                        text: .plain(NSAttributedString(string: strings.Gift_Options_Gift_Title, font: Font.bold(28.0), textColor: theme.rootController.navigationBar.primaryTextColor)),
+                        horizontalAlignment: .center
+                    )),
+                    environment: {},
+                    containerSize: CGSize(width: availableSize.width - headerSideInset * 2.0, height: 100.0)
+                )
+                if let starsTitleView = self.starsTitle.view {
+                    if starsTitleView.superview == nil {
+                        self.addSubview(starsTitleView)
+                    }
+                    transition.setBounds(view: starsTitleView, bounds: CGRect(origin: .zero, size: starsTitleSize))
+                }
+                
+                let starsDescriptionString = parseMarkdownIntoAttributedString(strings.Gift_Options_Gift_Text(peerName).string, attributes: markdownAttributes).mutableCopy() as! NSMutableAttributedString
+                if let range = starsDescriptionString.string.range(of: ">"), let chevronImage = self.chevronImage?.0 {
+                    starsDescriptionString.addAttribute(.attachment, value: chevronImage, range: NSRange(range, in: starsDescriptionString.string))
+                }
+                let starsDescriptionSize = self.starsDescription.update(
+                    transition: transition,
+                    component: AnyComponent(BalancedTextComponent(
+                        text: .plain(starsDescriptionString),
+                        horizontalAlignment: .center,
+                        maximumNumberOfLines: 0,
+                        lineSpacing: 0.2,
+                        highlightColor: accentColor.withAlphaComponent(0.1),
+                        highlightInset: UIEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: -8.0),
+                        highlightAction: { attributes in
+                            if let _ = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)] {
+                                return NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)
+                            } else {
+                                return nil
+                            }
+                        },
+                        tapAction: { [weak self] _, _ in
+                            guard let self, let component = self.component, let environment = self.environment else {
+                                return
+                            }
+                            let introController = component.context.sharedContext.makeStarsIntroScreen(context: component.context)
+                            if let controller = environment.controller() as? GiftOptionsScreen {
+                                let mainController: ViewController
+                                if let parentController = controller.parentController() {
+                                    mainController = parentController
+                                } else {
+                                    mainController = controller
+                                }
+                                mainController.push(introController)
+                            }
+                        }
+                    )),
+                    environment: {},
+                    containerSize: CGSize(width: availableSize.width - headerSideInset * 2.0, height: 1000.0)
+                )
+                let starsDescriptionFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - starsDescriptionSize.width) / 2.0), y: contentHeight), size: starsDescriptionSize)
+                if let starsDescriptionView = self.starsDescription.view {
+                    if starsDescriptionView.superview == nil {
+                        self.scrollView.addSubview(starsDescriptionView)
+                    }
+                    transition.setFrame(view: starsDescriptionView, frame: starsDescriptionFrame)
+                }
+                contentHeight += starsDescriptionSize.height
+                contentHeight += 16.0
             }
-            contentHeight += starsDescriptionSize.height
-            contentHeight += 16.0
             
             var tabSelectorItems: [TabSelectorComponent.Item] = []
             tabSelectorItems.append(TabSelectorComponent.Item(
@@ -880,13 +1069,22 @@ final class GiftOptionsScreenComponent: Component {
                 title: strings.Gift_Options_Gift_Filter_AllGifts
             ))
             
+            if let transferStarGifts = self.state?.transferStarGifts, !transferStarGifts.isEmpty {
+                tabSelectorItems.append(TabSelectorComponent.Item(
+                    id: AnyHashable(StarsFilter.transfer.rawValue),
+                    title: strings.Gift_Options_Gift_Filter_MyGifts
+                ))
+            }
+            
             var hasLimited = false
             var starsAmountsSet = Set<Int64>()
             if let starGifts = self.state?.starGifts {
-                for product in starGifts {
-                    starsAmountsSet.insert(product.price)
-                    if product.availability != nil {
-                        hasLimited = true
+                for gift in starGifts {
+                    if case let .generic(gift) = gift {
+                        starsAmountsSet.insert(gift.price)
+                        if gift.availability != nil {
+                            hasLimited = true
+                        }
                     }
                 }
             }
@@ -897,6 +1095,11 @@ final class GiftOptionsScreenComponent: Component {
                     title: strings.Gift_Options_Gift_Filter_Limited
                 ))
             }
+            
+            tabSelectorItems.append(TabSelectorComponent.Item(
+                id: AnyHashable(StarsFilter.inStock.rawValue),
+                title: strings.Gift_Options_Gift_Filter_InStock
+            ))
 
             let starsAmounts = Array(starsAmountsSet).sorted()
             for amount in starsAmounts {
@@ -995,12 +1198,17 @@ final class GiftOptionsScreenComponent: Component {
         fileprivate var premiumProducts: [PremiumGiftProduct]?
         fileprivate var starGifts: [StarGift]?
         
+        private let starGiftsContext: ProfileGiftsContext
+        fileprivate var transferStarGifts: [ProfileGiftsContext.State.StarGift]?
+        
         init(
             context: AccountContext,
             peerId: EnginePeer.Id,
             premiumOptions: [CachedPremiumGiftOption]
         ) {
             self.context = context
+            
+            self.starGiftsContext = ProfileGiftsContext(account: context.account, peerId: context.account.peerId)
             
             super.init()
             
@@ -1017,48 +1225,66 @@ final class GiftOptionsScreenComponent: Component {
                     TelegramEngine.EngineData.Item.Peer.Peer.init(id: peerId)
                 ),
                 availableProducts,
-                context.engine.payments.cachedStarGifts()
-            ).start(next: { [weak self] peer, availableProducts, starGifts in
+                context.engine.payments.cachedStarGifts(),
+                self.starGiftsContext.state
+            ).start(next: { [weak self] peer, availableProducts, starGifts, profileGiftsState in
                 guard let self, let peer else {
                     return
                 }
                 self.peer = peer
                 
-                if availableProducts.isEmpty {
-                    var premiumProducts: [PremiumGiftProduct] = []
-                    for option in premiumOptions {
-                        premiumProducts.append(
-                            PremiumGiftProduct(
-                                giftOption: CachedPremiumGiftOption(
-                                    months: option.months,
-                                    currency: option.currency,
-                                    amount: option.amount,
-                                    botUrl: "",
-                                    storeProductId: option.storeProductId
-                                ),
-                                storeProduct: nil,
-                                discount: nil
+                if peerId != context.account.peerId {
+                    if availableProducts.isEmpty {
+                        var premiumProducts: [PremiumGiftProduct] = []
+                        for option in premiumOptions {
+                            premiumProducts.append(
+                                PremiumGiftProduct(
+                                    giftOption: CachedPremiumGiftOption(
+                                        months: option.months,
+                                        currency: option.currency,
+                                        amount: option.amount,
+                                        botUrl: "",
+                                        storeProductId: option.storeProductId
+                                    ),
+                                    starsGiftOption: nil,
+                                    storeProduct: nil,
+                                    discount: nil
+                                )
                             )
-                        )
-                    }
-                    self.premiumProducts = premiumProducts.sorted(by: { $0.months < $1.months })
-                } else {
-                    let shortestOptionPrice: (Int64, NSDecimalNumber)
-                    if let product = availableProducts.first(where: { $0.id.hasSuffix(".monthly") }) {
-                        shortestOptionPrice = (Int64(Float(product.priceCurrencyAndAmount.amount)), product.priceValue)
+                        }
+                        self.premiumProducts = premiumProducts.sorted(by: { $0.months < $1.months })
                     } else {
-                        shortestOptionPrice = (1, NSDecimalNumber(decimal: 1))
+                        let shortestOptionPrice: (Int64, NSDecimalNumber)
+                        if let product = availableProducts.first(where: { $0.id.hasSuffix(".monthly") }) {
+                            shortestOptionPrice = (Int64(Float(product.priceCurrencyAndAmount.amount)), product.priceValue)
+                        } else {
+                            shortestOptionPrice = (1, NSDecimalNumber(decimal: 1))
+                        }
+                        
+                        var premiumProducts: [PremiumGiftProduct] = []
+                        for option in premiumOptions {
+                            if let product = availableProducts.first(where: { $0.id == option.storeProductId }), !product.isSubscription {
+                                let fraction = Float(product.priceCurrencyAndAmount.amount) / Float(option.months) / Float(shortestOptionPrice.0)
+                                let discountValue = Int(round((1.0 - fraction) * 20.0) * 5.0)
+                                let starsGiftOption = premiumOptions.first(where: { $0.currency == "XTR" && $0.months == option.months })
+                                
+                                premiumProducts.append(PremiumGiftProduct(
+                                    giftOption: option,
+                                    starsGiftOption: starsGiftOption,
+                                    storeProduct: product,
+                                    discount: discountValue > 0 ? discountValue : nil
+                                ))
+                            }
+                        }
+                        self.premiumProducts = premiumProducts.sorted(by: { $0.months < $1.months })
                     }
-                    
-                    var premiumProducts: [PremiumGiftProduct] = []
-                    for option in premiumOptions {
-                        if let product = availableProducts.first(where: { $0.id == option.storeProductId }), !product.isSubscription {
-                            let fraction = Float(product.priceCurrencyAndAmount.amount) / Float(option.months) / Float(shortestOptionPrice.0)
-                            let discountValue = Int(round((1.0 - fraction) * 20.0) * 5.0)
-                            premiumProducts.append(PremiumGiftProduct(giftOption: option, storeProduct: product, discount: discountValue > 0 ? discountValue : nil))
+                    self.transferStarGifts = profileGiftsState.gifts.compactMap { gift in
+                        if case .unique = gift.gift {
+                            return gift
+                        } else {
+                            return nil
                         }
                     }
-                    self.premiumProducts = premiumProducts.sorted(by: { $0.months < $1.months })
                 }
                     
                 self.starGifts = starGifts
@@ -1130,5 +1356,16 @@ open class GiftOptionsScreen: ViewControllerComponentContainer, GiftOptionsScree
     
     override public func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
+    }
+}
+
+private extension StarGift {
+    var id: String {
+        switch self {
+        case let .generic(gift):
+            return "\(gift.id)"
+        case let .unique(gift):
+            return gift.slug
+        }
     }
 }

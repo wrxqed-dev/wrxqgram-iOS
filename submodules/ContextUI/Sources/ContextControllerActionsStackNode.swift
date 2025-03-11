@@ -15,6 +15,7 @@ import MultiAnimationRenderer
 import AnimationUI
 import ComponentFlow
 import LottieComponent
+import TextNodeWithEntities
 
 public protocol ContextControllerActionsStackItemNode: ASDisplayNode {
     var wantsFullWidth: Bool { get }
@@ -71,6 +72,7 @@ public final class ContextControllerPreviewReaction {
 
 public protocol ContextControllerActionsStackItem: AnyObject {
     func node(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -94,13 +96,14 @@ public protocol ContextControllerActionsListItemNode: ASDisplayNode {
 }
 
 public final class ContextControllerActionsListActionItemNode: HighlightTrackingButtonNode, ContextControllerActionsListItemNode {
+    private let context: AccountContext?
     private let getController: () -> ContextControllerProtocol?
     private let requestDismiss: (ContextMenuActionResult) -> Void
     private let requestUpdateAction: (AnyHashable, ContextMenuActionItem) -> Void
     private var item: ContextMenuActionItem
     
     private let highlightBackgroundNode: ASDisplayNode
-    private let titleLabelNode: ImmediateTextNode
+    private let titleLabelNode: ImmediateTextNodeWithEntities
     private let subtitleNode: ImmediateTextNode
     private let iconNode: ASImageNode
     private let additionalIconNode: ASImageNode
@@ -115,11 +118,13 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
     private var iconDisposable: Disposable?
     
     public init(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdateAction: @escaping (AnyHashable, ContextMenuActionItem) -> Void,
         item: ContextMenuActionItem
     ) {
+        self.context = context
         self.getController = getController
         self.requestDismiss = requestDismiss
         self.requestUpdateAction = requestUpdateAction
@@ -130,7 +135,7 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
         self.highlightBackgroundNode.isUserInteractionEnabled = false
         self.highlightBackgroundNode.alpha = 0.0
         
-        self.titleLabelNode = ImmediateTextNode()
+        self.titleLabelNode = ImmediateTextNodeWithEntities()
         self.titleLabelNode.isAccessibilityElement = false
         self.titleLabelNode.displaysAsynchronously = false
         
@@ -167,8 +172,10 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
             }
             if highlighted {
                 strongSelf.highlightBackgroundNode.alpha = 1.0
+                strongSelf.startTimer()
             } else {
                 strongSelf.highlightBackgroundNode.alpha = 0.0
+                strongSelf.invalidateTimer()
             }
         }
         
@@ -178,6 +185,25 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
     deinit {
         self.iconDisposable?.dispose()
     }
+        
+    private var timer: SwiftSignalKit.Timer?
+    private func startTimer() {
+        self.invalidateTimer()
+        
+        self.timer = SwiftSignalKit.Timer(timeout: 1.0, repeat: false, completion: { [weak self] in
+            guard let self else {
+                return
+            }
+            self.invalidateTimer()
+            self.longPressed()
+        }, queue: Queue.mainQueue())
+        self.timer?.start()
+    }
+    
+    private func invalidateTimer() {
+        self.timer?.invalidate()
+        self.timer = nil
+    }
     
     public override func didLoad() {
         super.didLoad()
@@ -186,7 +212,29 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
     }
     
     @objc private func pressed() {
+        self.invalidateTimer()
+        
         self.item.action?(ContextMenuActionItem.Action(
+            controller: self.getController(),
+            dismissWithResult: { [weak self] result in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.requestDismiss(result)
+            },
+            updateAction: { [weak self] id, updatedAction in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.requestUpdateAction(id, updatedAction)
+            }
+        ))
+    }
+    
+    private func longPressed() {
+        self.touchesCancelled(nil, with: nil)
+        
+        self.item.longPressAction?(ContextMenuActionItem.Action(
             controller: self.getController(),
             dismissWithResult: { [weak self] result in
                 guard let strongSelf = self else {
@@ -262,6 +310,17 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
         let subtitleFont = Font.regular(presentationData.listsFontSize.baseDisplaySize * 14.0 / 17.0)
         let subtitleColor = presentationData.theme.contextMenu.secondaryColor
         
+        if let context = self.context {
+            self.titleLabelNode.arguments = TextNodeWithEntities.Arguments(
+                context: context,
+                cache: context.animationCache,
+                renderer: context.animationRenderer,
+                placeholderColor: presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.1),
+                attemptSynchronous: true
+            )
+        }
+        self.titleLabelNode.visibility = self.item.enableEntityAnimations
+        
         var subtitle: NSAttributedString?
         switch self.item.textLayout {
         case .singleLine:
@@ -296,16 +355,32 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
             titleColor = presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.4)
         }
         
-        if self.item.parseMarkdown {
-            let attributedText = parseMarkdownIntoAttributedString(
-                self.item.text,
-                attributes: MarkdownAttributes(
-                    body: MarkdownAttributeSet(font: titleFont, textColor: titleColor),
-                    bold: MarkdownAttributeSet(font: titleBoldFont, textColor: titleColor),
-                    link: MarkdownAttributeSet(font: titleBoldFont, textColor: presentationData.theme.list.itemAccentColor),
-                    linkAttribute: { value in return ("URL", value) }
+        if self.item.parseMarkdown || !self.item.entities.isEmpty {
+            let attributedText: NSAttributedString
+            if !self.item.entities.isEmpty {
+                let inputStateText = ChatTextInputStateText(text: self.item.text, attributes: self.item.entities.compactMap { entity -> ChatTextInputStateTextAttribute? in
+                    if case let .CustomEmoji(_, fileId) = entity.type {
+                        return ChatTextInputStateTextAttribute(type: .customEmoji(stickerPack: nil, fileId: fileId, enableAnimation: true), range: entity.range)
+                    }
+                    return nil
+                })
+                let result = NSMutableAttributedString(attributedString: inputStateText.attributedText())
+                result.addAttributes([
+                    .font: titleFont,
+                    .foregroundColor: titleColor
+                ], range: NSRange(location: 0, length: result.length))
+                attributedText = result
+            } else {
+                attributedText = parseMarkdownIntoAttributedString(
+                    self.item.text,
+                    attributes: MarkdownAttributes(
+                        body: MarkdownAttributeSet(font: titleFont, textColor: titleColor),
+                        bold: MarkdownAttributeSet(font: titleBoldFont, textColor: titleColor),
+                        link: MarkdownAttributeSet(font: titleBoldFont, textColor: presentationData.theme.list.itemAccentColor),
+                        linkAttribute: { value in return ("URL", value) }
+                    )
                 )
-            )
+            }
             self.titleLabelNode.attributedText = attributedText
             self.titleLabelNode.linkHighlightColor = presentationData.theme.list.itemAccentColor.withMultipliedAlpha(0.5)
             self.titleLabelNode.highlightAttributeAction = { attributes in
@@ -692,6 +767,7 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
             }
         }
         
+        private let context: AccountContext?
         private let requestUpdate: (ContainedViewLayoutTransition) -> Void
         private let getController: () -> ContextControllerProtocol?
         private let requestDismiss: (ContextMenuActionResult) -> Void
@@ -708,11 +784,13 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
         }
         
         init(
+            context: AccountContext?,
             getController: @escaping () -> ContextControllerProtocol?,
             requestDismiss: @escaping (ContextMenuActionResult) -> Void,
             requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
             items: [ContextMenuItem]
         ) {
+            self.context = context
             self.requestUpdate = requestUpdate
             self.getController = getController
             self.requestDismiss = requestDismiss
@@ -724,6 +802,7 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
                 case let .action(actionItem):
                     return Item(
                         node: ContextControllerActionsListActionItemNode(
+                            context: context,
                             getController: getController,
                             requestDismiss: requestDismiss,
                             requestUpdateAction: { id, action in
@@ -794,6 +873,7 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
                         
                         let addedNode = Item(
                             node: ContextControllerActionsListActionItemNode(
+                                context: self.context,
                                 getController: self.getController,
                                 requestDismiss: self.requestDismiss,
                                 requestUpdateAction: { [weak self] id, action in
@@ -981,12 +1061,14 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
     }
     
     public func node(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
         requestUpdateApparentHeight: @escaping (ContainedViewLayoutTransition) -> Void
     ) -> ContextControllerActionsStackItemNode {
         return Node(
+            context: context,
             getController: getController,
             requestDismiss: requestDismiss,
             requestUpdate: requestUpdate,
@@ -1082,6 +1164,7 @@ final class ContextControllerActionsCustomStackItem: ContextControllerActionsSta
     }
     
     func node(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -1246,6 +1329,7 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
         private var tipDisposable: Disposable?
         
         init(
+            context: AccountContext?,
             getController: @escaping () -> ContextControllerProtocol?,
             requestDismiss: @escaping (ContextMenuActionResult) -> Void,
             requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -1262,6 +1346,7 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
             self.requestUpdate = requestUpdate
             self.item = item
             self.node = item.node(
+                context: context,
                 getController: getController,
                 requestDismiss: requestDismiss,
                 requestUpdate: requestUpdate,
@@ -1396,6 +1481,7 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
         }
     }
     
+    private let context: AccountContext?
     private let getController: () -> ContextControllerProtocol?
     private let requestDismiss: (ContextMenuActionResult) -> Void
     private let requestUpdate: (ContainedViewLayoutTransition) -> Void
@@ -1423,10 +1509,12 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
     }
     
     public init(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void
     ) {
+        self.context = context
         self.getController = getController
         self.requestDismiss = requestDismiss
         self.requestUpdate = requestUpdate
@@ -1534,6 +1622,7 @@ public final class ContextControllerActionsStackNode: ASDisplayNode {
             itemContainer.storedScrollingState = currentScrollingState
         }
         let itemContainer = ItemContainer(
+            context: self.context,
             getController: self.getController,
             requestDismiss: self.requestDismiss,
             requestUpdate: self.requestUpdate,

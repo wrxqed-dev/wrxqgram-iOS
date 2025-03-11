@@ -28,9 +28,9 @@ import GenerateStickerPlaceholderImage
 
 public struct EmojiComponentReactionItem: Equatable {
     public var reaction: MessageReaction.Reaction
-    public var file: TelegramMediaFile
+    public var file: TelegramMediaFile.Accessor
     
-    public init(reaction: MessageReaction.Reaction, file: TelegramMediaFile) {
+    public init(reaction: MessageReaction.Reaction, file: TelegramMediaFile.Accessor) {
         self.reaction = reaction
         self.file = file
     }
@@ -40,6 +40,7 @@ public final class EntityKeyboardAnimationData: Equatable {
     public enum Id: Hashable {
         case file(MediaId)
         case stickerPackThumbnail(ItemCollectionId)
+        case gift(String)
     }
     
     public enum ItemType {
@@ -59,15 +60,35 @@ public final class EntityKeyboardAnimationData: Equatable {
         }
     }
     
+    public enum Resource: Equatable {
+        case resource(MediaResourceReference)
+        case file(PartialMediaReference?, TelegramMediaFile.Accessor)
+        
+        func _parse() -> MediaResourceReference {
+            switch self {
+            case let .resource(resource):
+                return resource
+            case let .file(partialReference, file):
+                let file = file._parse()
+                if let partialReference {
+                    return partialReference.mediaReference(file).resourceReference(file.resource)
+                } else {
+                    return .standalone(resource: file.resource)
+                }
+            }
+        }
+    }
+    
     public let id: Id
     public let type: ItemType
-    public let resource: MediaResourceReference
+    public let resource: Resource
     public let dimensions: CGSize
     public let immediateThumbnailData: Data?
     public let isReaction: Bool
     public let isTemplate: Bool
+    public let particleColor: UIColor?
     
-    public init(id: Id, type: ItemType, resource: MediaResourceReference, dimensions: CGSize, immediateThumbnailData: Data?, isReaction: Bool, isTemplate: Bool) {
+    public init(id: Id, type: ItemType, resource: Resource, dimensions: CGSize, immediateThumbnailData: Data?, isReaction: Bool, isTemplate: Bool, particleColor: UIColor? = nil) {
         self.id = id
         self.type = type
         self.resource = resource
@@ -75,9 +96,10 @@ public final class EntityKeyboardAnimationData: Equatable {
         self.immediateThumbnailData = immediateThumbnailData
         self.isReaction = isReaction
         self.isTemplate = isTemplate
+        self.particleColor = particleColor
     }
     
-    public convenience init(file: TelegramMediaFile, isReaction: Bool = false, partialReference: PartialMediaReference? = nil) {
+    public convenience init(file: TelegramMediaFile.Accessor, isReaction: Bool = false, partialReference: PartialMediaReference? = nil) {
         let type: ItemType
         if file.isVideoSticker || file.isVideoEmoji {
             type = .video
@@ -88,13 +110,27 @@ public final class EntityKeyboardAnimationData: Equatable {
         }
         let isTemplate = file.isCustomTemplateEmoji
         
-        let resourceReference: MediaResourceReference
-        if let partialReference {
-            resourceReference = partialReference.mediaReference(file).resourceReference(file.resource)
-        } else {
-            resourceReference = .standalone(resource: file.resource)
+        let resource: Resource = .file(partialReference, file)
+        self.init(id: .file(file.fileId), type: type, resource: resource, dimensions: file.dimensions?.cgSize ?? CGSize(width: 512.0, height: 512.0), immediateThumbnailData: file.immediateThumbnailData, isReaction: isReaction, isTemplate: isTemplate)
+    }
+    
+    public convenience init?(gift: StarGift.UniqueGift) {
+        var file: TelegramMediaFile?
+        var color: UIColor?
+        for attribute in gift.attributes {
+            if case let .model(_, fileValue, _) = attribute {
+                file = fileValue
+            } else if case let .backdrop(_, innerColor, outerColor, _, _, _) = attribute {
+                color = UIColor(rgb: UInt32(bitPattern: innerColor))
+                let _ = outerColor
+            }
         }
-        self.init(id: .file(file.fileId), type: type, resource: resourceReference, dimensions: file.dimensions?.cgSize ?? CGSize(width: 512.0, height: 512.0), immediateThumbnailData: file.immediateThumbnailData, isReaction: isReaction, isTemplate: isTemplate)
+        if let file, let color {
+            let resourceReference: MediaResourceReference = .standalone(resource: file.resource)
+            self.init(id: .gift(gift.slug), type: .lottie, resource: .resource(resourceReference), dimensions: file.dimensions?.cgSize ?? CGSize(width: 512.0, height: 512.0), immediateThumbnailData: file.immediateThumbnailData, isReaction: false, isTemplate: false, particleColor: color)
+        } else {
+            return nil
+        }
     }
     
     public static func ==(lhs: EntityKeyboardAnimationData, rhs: EntityKeyboardAnimationData) -> Bool {
@@ -102,7 +138,7 @@ public final class EntityKeyboardAnimationData: Equatable {
             return true
         }
         
-        if lhs.resource.resource.id != rhs.resource.resource.id {
+        if lhs.resource != rhs.resource {
             return false
         }
         if lhs.dimensions != rhs.dimensions {
@@ -335,6 +371,7 @@ public final class EmojiPagerContentComponent: Component {
             case animation(EntityKeyboardAnimationData.Id)
             case staticEmoji(String)
             case icon(Icon)
+            case starGift(String)
         }
         
         public enum Icon: Equatable, Hashable {
@@ -378,7 +415,8 @@ public final class EmojiPagerContentComponent: Component {
         
         public let animationData: EntityKeyboardAnimationData?
         public let content: ItemContent
-        public let itemFile: TelegramMediaFile?
+        public let itemFile: TelegramMediaFile.Accessor?
+        public let itemGift: StarGift.UniqueGift?
         public let subgroupId: Int32?
         public let icon: Icon
         public let tintMode: TintMode
@@ -386,7 +424,8 @@ public final class EmojiPagerContentComponent: Component {
         public init(
             animationData: EntityKeyboardAnimationData?,
             content: ItemContent,
-            itemFile: TelegramMediaFile?,
+            itemFile: TelegramMediaFile.Accessor?,
+            itemGift: StarGift.UniqueGift? = nil,
             subgroupId: Int32?,
             icon: Icon,
             tintMode: TintMode
@@ -394,6 +433,7 @@ public final class EmojiPagerContentComponent: Component {
             self.animationData = animationData
             self.content = content
             self.itemFile = itemFile
+            self.itemGift = itemGift
             self.subgroupId = subgroupId
             self.icon = icon
             self.tintMode = tintMode
@@ -403,13 +443,16 @@ public final class EmojiPagerContentComponent: Component {
             if lhs === rhs {
                 return true
             }
-            if lhs.animationData?.resource.resource.id != rhs.animationData?.resource.resource.id {
+            if lhs.animationData?.resource != rhs.animationData?.resource {
                 return false
             }
             if lhs.content != rhs.content {
                 return false
             }
             if lhs.itemFile?.fileId != rhs.itemFile?.fileId {
+                return false
+            }
+            if lhs.itemGift?.id != rhs.itemGift?.id {
                 return false
             }
             if lhs.subgroupId != rhs.subgroupId {
@@ -1342,9 +1385,10 @@ public final class EmojiPagerContentComponent: Component {
         private var isSearchActivated: Bool = false
         
         private let backgroundView: BlurredBackgroundView
+        private let backgroundTintView: UIView
         private var fadingMaskLayer: FadingMaskLayer?
         private var vibrancyClippingView: UIView
-        private var vibrancyEffectView: UIVisualEffectView?
+        private var vibrancyEffectView: UIView?
         public private(set) var mirrorContentClippingView: UIView?
         private let mirrorContentScrollView: UIView
         private var warpView: WarpView?
@@ -1398,6 +1442,7 @@ public final class EmojiPagerContentComponent: Component {
         
         override init(frame: CGRect) {
             self.backgroundView = BlurredBackgroundView(color: nil)
+            self.backgroundTintView = UIView()
             
             if ProcessInfo.processInfo.processorCount > 4 {
                 self.shimmerHostView = PortalSourceView()
@@ -1423,6 +1468,7 @@ public final class EmojiPagerContentComponent: Component {
             
             super.init(frame: frame)
             
+            self.backgroundView.addSubview(self.backgroundTintView)
             self.addSubview(self.backgroundView)
             
             if let shimmerHostView = self.shimmerHostView {
@@ -1618,7 +1664,7 @@ public final class EmojiPagerContentComponent: Component {
                     if let mirrorContentClippingView = self.mirrorContentClippingView {
                         mirrorContentClippingView.addSubview(self.mirrorContentScrollView)
                     } else if let vibrancyEffectView = self.vibrancyEffectView {
-                        vibrancyEffectView.contentView.addSubview(self.mirrorContentScrollView)
+                        vibrancyEffectView.addSubview(self.mirrorContentScrollView)
                     }
                     
                     mirrorContentWarpView.removeFromSuperview()
@@ -1691,7 +1737,7 @@ public final class EmojiPagerContentComponent: Component {
                         })
                     }
                     
-                    component.animationRenderer.setFrameIndex(itemId: animationData.resource.resource.id.stringRepresentation, size: itemLayer.pixelSize, frameIndex: sourceItem.frameIndex, placeholder: sourceItem.placeholder)
+                    component.animationRenderer.setFrameIndex(itemId: animationData.resource._parse().resource.id.stringRepresentation, size: itemLayer.pixelSize, frameIndex: sourceItem.frameIndex, placeholder: sourceItem.placeholder)
                 } else {
                     let distance = itemLayer.position.y - itemLayout.frame(groupIndex: 0, itemIndex: 0).midY
                     let maxDistance = self.bounds.height
@@ -2757,7 +2803,7 @@ public final class EmojiPagerContentComponent: Component {
                 
                 self.longPressItem = item.1
                 
-                if #available(iOS 13.0, *) {
+                if #available(iOS 13.0, *), item.0.itemFile != nil {
                     self.continuousHaptic = try? ContinuousHaptic(duration: longPressDuration)
                 }
                 
@@ -3172,7 +3218,7 @@ public final class EmojiPagerContentComponent: Component {
                         }
                         
                         groupBorderLayer.strokeColor = borderColor.cgColor
-                        groupBorderLayer.tintContainerLayer.strokeColor = UIColor.white.cgColor
+                        groupBorderLayer.tintContainerLayer.strokeColor = UIColor.black.cgColor
                         groupBorderLayer.lineWidth = 1.6
                         groupBorderLayer.lineCap = .round
                         groupBorderLayer.fillColor = nil
@@ -3458,6 +3504,9 @@ public final class EmojiPagerContentComponent: Component {
                             )
                             
                             self.visibleItemLayers[itemId] = itemLayer
+                            if let underlyingContentLayer = itemLayer.underlyingContentLayer {
+                                self.scrollView.layer.addSublayer(underlyingContentLayer)
+                            }
                             self.scrollView.layer.addSublayer(itemLayer)
                             if let tintContentLayer = itemLayer.tintContentLayer {
                                 self.mirrorContentScrollView.layer.addSublayer(tintContentLayer)
@@ -3584,7 +3633,7 @@ public final class EmojiPagerContentComponent: Component {
                                     itemSelectionLayer.tintContainerLayer.backgroundColor = UIColor.clear.cgColor
                                 } else {
                                     itemSelectionLayer.backgroundColor = keyboardChildEnvironment.theme.chat.inputMediaPanel.panelContentControlVibrantSelectionColor.cgColor
-                                    itemSelectionLayer.tintContainerLayer.backgroundColor = UIColor(white: 1.0, alpha: 0.2).cgColor
+                                    itemSelectionLayer.tintContainerLayer.backgroundColor = UIColor(white: 0.0, alpha: 0.2).cgColor
                                 }
                             }
                             
@@ -3689,6 +3738,7 @@ public final class EmojiPagerContentComponent: Component {
                             itemLayer.opacity = 0.0
                             itemLayer.animateScale(from: 1.0, to: 0.01, duration: 0.16)
                             itemLayer.animateAlpha(from: 1.0, to: 0.0, duration: 0.16, completion: { [weak itemLayer] _ in
+                                itemLayer?.underlyingContentLayer?.removeFromSuperlayer()
                                 itemLayer?.tintContentLayer?.removeFromSuperlayer()
                                 itemLayer?.removeFromSuperlayer()
                             })
@@ -3709,6 +3759,7 @@ public final class EmojiPagerContentComponent: Component {
                             }
                         } else if let position = updatedItemPositions?[.item(id: id)], transitionHintInstalledGroupId != id.groupId {
                             transition.setPosition(layer: itemLayer, position: position, completion: { [weak itemLayer] _ in
+                                itemLayer?.underlyingContentLayer?.removeFromSuperlayer()
                                 itemLayer?.tintContentLayer?.removeFromSuperlayer()
                                 itemLayer?.removeFromSuperlayer()
                             })
@@ -3723,6 +3774,7 @@ public final class EmojiPagerContentComponent: Component {
                             itemLayer.opacity = 0.0
                             itemLayer.animateScale(from: 1.0, to: 0.01, duration: 0.2)
                             itemLayer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, completion: { [weak itemLayer] _ in
+                                itemLayer?.underlyingContentLayer?.removeFromSuperlayer()
                                 itemLayer?.tintContentLayer?.removeFromSuperlayer()
                                 itemLayer?.removeFromSuperlayer()
                             })
@@ -3743,6 +3795,7 @@ public final class EmojiPagerContentComponent: Component {
                             }
                         }
                     } else {
+                        itemLayer.underlyingContentLayer?.removeFromSuperlayer()
                         itemLayer.tintContentLayer?.removeFromSuperlayer()
                         itemLayer.removeFromSuperlayer()
                         
@@ -4009,15 +4062,15 @@ public final class EmojiPagerContentComponent: Component {
                 }
             } else {
                 if self.vibrancyEffectView == nil {
-                    let style: UIBlurEffect.Style
-                    style = .extraLight
-                    let blurEffect = UIBlurEffect(style: style)
-                    let vibrancyEffect = UIVibrancyEffect(blurEffect: blurEffect)
-                    let vibrancyEffectView = UIVisualEffectView(effect: vibrancyEffect)
+                    let vibrancyEffectView = UIView()
+                    vibrancyEffectView.backgroundColor = .white
+                    if let filter = CALayer.luminanceToAlpha() {
+                        vibrancyEffectView.layer.filters = [filter]
+                    }
                     self.vibrancyEffectView = vibrancyEffectView
-                    self.backgroundView.addSubview(vibrancyEffectView)
+                    self.backgroundTintView.mask = vibrancyEffectView
                     self.vibrancyClippingView.addSubview(self.mirrorContentScrollView)
-                    vibrancyEffectView.contentView.addSubview(self.vibrancyClippingView)
+                    vibrancyEffectView.addSubview(self.vibrancyClippingView)
                 }
             }
             
@@ -4046,7 +4099,11 @@ public final class EmojiPagerContentComponent: Component {
             if hideBackground {
                 backgroundColor = backgroundColor.withAlphaComponent(0.01)
             }
-            self.backgroundView.updateColor(color: backgroundColor, enableBlur: true, forceKeepBlur: false, transition: transition.containedViewLayoutTransition)
+            
+            self.backgroundTintView.backgroundColor = backgroundColor
+            transition.setFrame(view: self.backgroundTintView, frame: CGRect(origin: CGPoint(), size: backgroundFrame.size))
+            
+            self.backgroundView.updateColor(color: .clear, enableBlur: true, forceKeepBlur: true, transition: transition.containedViewLayoutTransition)
             transition.setFrame(view: self.backgroundView, frame: backgroundFrame)
             self.backgroundView.update(size: backgroundFrame.size, transition: transition.containedViewLayoutTransition)
             
@@ -4083,7 +4140,7 @@ public final class EmojiPagerContentComponent: Component {
                 if itemLayer.displayPlaceholder {
                     return nil
                 }
-                return (item.1.groupId, itemLayer, file)
+                return (item.1.groupId, itemLayer, file._parse())
             })
             
             let keyboardChildEnvironment = environment[EntityKeyboardChildEnvironment.self].value
@@ -4652,7 +4709,7 @@ public final class EmojiPagerContentComponent: Component {
                     if let mirrorContentClippingView = self.mirrorContentClippingView {
                         mirrorContentClippingView.addSubview(visibleEmptySearchResultsView.tintContainerView)
                     } else if let vibrancyEffectView = self.vibrancyEffectView {
-                        vibrancyEffectView.contentView.addSubview(visibleEmptySearchResultsView.tintContainerView)
+                        vibrancyEffectView.addSubview(visibleEmptySearchResultsView.tintContainerView)
                     }
                 }
                 let emptySearchResultsSize = CGSize(width: availableSize.width, height: availableSize.height - itemLayout.searchInsets.top - itemLayout.searchHeight)

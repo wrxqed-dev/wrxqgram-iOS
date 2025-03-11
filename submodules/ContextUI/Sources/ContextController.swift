@@ -125,6 +125,8 @@ public final class ContextMenuActionItem {
 
     public let id: AnyHashable?
     public let text: String
+    public let entities: [MessageTextEntity]
+    public let enableEntityAnimations: Bool
     public let textColor: ContextMenuActionItemTextColor
     public let textFont: ContextMenuActionItemFont
     public let textLayout: ContextMenuActionItemTextLayout
@@ -139,10 +141,13 @@ public final class ContextMenuActionItem {
     public let textIcon: (PresentationTheme) -> UIImage?
     public let textLinkAction: () -> Void
     public let action: ((Action) -> Void)?
+    public let longPressAction: ((Action) -> Void)?
     
     convenience public init(
         id: AnyHashable? = nil,
         text: String,
+        entities: [MessageTextEntity] = [],
+        enableEntityAnimations: Bool = true,
         textColor: ContextMenuActionItemTextColor = .primary,
         textLayout: ContextMenuActionItemTextLayout = .twoLinesMax,
         textFont: ContextMenuActionItemFont = .regular,
@@ -156,11 +161,14 @@ public final class ContextMenuActionItem {
         iconAnimation: IconAnimation? = nil,
         textIcon: @escaping (PresentationTheme) -> UIImage? = { _ in return nil },
         textLinkAction: @escaping () -> Void = {},
-        action: ((ContextControllerProtocol?, @escaping (ContextMenuActionResult) -> Void) -> Void)?
+        action: ((ContextControllerProtocol?, @escaping (ContextMenuActionResult) -> Void) -> Void)?,
+        longPressAction: ((ContextControllerProtocol?, @escaping (ContextMenuActionResult) -> Void) -> Void)? = nil
     ) {
         self.init(
             id: id,
             text: text,
+            entities: entities,
+            enableEntityAnimations: enableEntityAnimations,
             textColor: textColor,
             textLayout: textLayout,
             textFont: textFont,
@@ -178,6 +186,11 @@ public final class ContextMenuActionItem {
                 return { impl in
                     action(impl.controller, impl.dismissWithResult)
                 }
+            },
+            longPressAction: longPressAction.flatMap { longPressAction in
+                return { impl in
+                    longPressAction(impl.controller, impl.dismissWithResult)
+                }
             }
         )
     }
@@ -185,6 +198,8 @@ public final class ContextMenuActionItem {
     public init(
         id: AnyHashable? = nil,
         text: String,
+        entities: [MessageTextEntity] = [],
+        enableEntityAnimations: Bool = true,
         textColor: ContextMenuActionItemTextColor = .primary,
         textLayout: ContextMenuActionItemTextLayout = .twoLinesMax,
         textFont: ContextMenuActionItemFont = .regular,
@@ -198,10 +213,13 @@ public final class ContextMenuActionItem {
         iconAnimation: IconAnimation? = nil,
         textIcon: @escaping (PresentationTheme) -> UIImage? = { _ in return nil },
         textLinkAction: @escaping () -> Void = {},
-        action: ((Action) -> Void)?
+        action: ((Action) -> Void)?,
+        longPressAction: ((Action) -> Void)? = nil
     ) {
         self.id = id
         self.text = text
+        self.entities = entities
+        self.enableEntityAnimations = enableEntityAnimations
         self.textColor = textColor
         self.textFont = textFont
         self.textLayout = textLayout
@@ -216,6 +234,7 @@ public final class ContextMenuActionItem {
         self.textIcon = textIcon
         self.textLinkAction = textLinkAction
         self.action = action
+        self.longPressAction = longPressAction
     }
 }
 
@@ -258,6 +277,7 @@ func convertFrame(_ frame: CGRect, from fromView: UIView, to toView: UIView) -> 
 
 final class ContextControllerNode: ViewControllerTracingNode, ASScrollViewDelegate {
     private weak var controller: ContextController?
+    private let context: AccountContext?
     private var presentationData: PresentationData
     
     private let configuration: ContextController.Configuration
@@ -324,6 +344,7 @@ final class ContextControllerNode: ViewControllerTracingNode, ASScrollViewDelega
     
     init(
         controller: ContextController,
+        context: AccountContext?,
         presentationData: PresentationData,
         configuration: ContextController.Configuration,
         beginDismiss: @escaping (ContextMenuActionResult) -> Void,
@@ -333,6 +354,7 @@ final class ContextControllerNode: ViewControllerTracingNode, ASScrollViewDelega
         attemptTransitionControllerIntoNavigation: @escaping () -> Void
     ) {
         self.controller = controller
+        self.context = context
         self.presentationData = presentationData
         self.configuration = configuration
         self.beginDismiss = beginDismiss
@@ -704,7 +726,7 @@ final class ContextControllerNode: ViewControllerTracingNode, ASScrollViewDelega
         }
         
         if let controller = self.controller {
-            let sourceContainer = ContextSourceContainer(controller: controller, configuration: self.configuration)
+            let sourceContainer = ContextSourceContainer(controller: controller, configuration: self.configuration, context: self.context)
             self.contentReady.set(sourceContainer.ready.get())
             self.itemsReady.set(.single(true))
             self.sourceContainer = sourceContainer
@@ -2437,6 +2459,7 @@ public final class ContextController: ViewController, StandalonePresentableContr
         }
     }
 
+    private let context: AccountContext?
     private var presentationData: PresentationData
     private let configuration: ContextController.Configuration
     
@@ -2476,6 +2499,7 @@ public final class ContextController: ViewController, StandalonePresentableContr
     public var immediateItemsTransitionAnimation = false
     let workaroundUseLegacyImplementation: Bool
     let disableScreenshots: Bool
+    let hideReactionPanelTail: Bool
 
     public enum HandledTouchEvent {
         case ignore
@@ -2491,8 +2515,9 @@ public final class ContextController: ViewController, StandalonePresentableContr
     
     public var getOverlayViews: (() -> [UIView])?
     
-    convenience public init(presentationData: PresentationData, source: ContextContentSource, items: Signal<ContextController.Items, NoError>, recognizer: TapLongTapOrDoubleTapGestureRecognizer? = nil, gesture: ContextGesture? = nil, workaroundUseLegacyImplementation: Bool = false, disableScreenshots: Bool = false) {
+    convenience public init(context: AccountContext? = nil, presentationData: PresentationData, source: ContextContentSource, items: Signal<ContextController.Items, NoError>, recognizer: TapLongTapOrDoubleTapGestureRecognizer? = nil, gesture: ContextGesture? = nil, workaroundUseLegacyImplementation: Bool = false, disableScreenshots: Bool = false, hideReactionPanelTail: Bool = false) {
         self.init(
+            context: context,
             presentationData: presentationData,
             configuration: ContextController.Configuration(
                 sources: [ContextController.Source(
@@ -2506,24 +2531,29 @@ public final class ContextController: ViewController, StandalonePresentableContr
             recognizer: recognizer,
             gesture: gesture,
             workaroundUseLegacyImplementation: workaroundUseLegacyImplementation,
-            disableScreenshots: disableScreenshots
+            disableScreenshots: disableScreenshots,
+            hideReactionPanelTail: hideReactionPanelTail
         )
     }
     
     public init(
+        context: AccountContext? = nil,
         presentationData: PresentationData,
         configuration: ContextController.Configuration,
         recognizer: TapLongTapOrDoubleTapGestureRecognizer? = nil,
         gesture: ContextGesture? = nil,
         workaroundUseLegacyImplementation: Bool = false,
-        disableScreenshots: Bool = false
+        disableScreenshots: Bool = false,
+        hideReactionPanelTail: Bool = false
     ) {
+        self.context = context
         self.presentationData = presentationData
         self.configuration = configuration
         self.recognizer = recognizer
         self.gesture = gesture
         self.workaroundUseLegacyImplementation = workaroundUseLegacyImplementation
         self.disableScreenshots = disableScreenshots
+        self.hideReactionPanelTail = hideReactionPanelTail
         
         super.init(navigationBarPresentationData: nil)
         
@@ -2586,7 +2616,7 @@ public final class ContextController: ViewController, StandalonePresentableContr
     }
     
     override public func loadDisplayNode() {
-        self.displayNode = ContextControllerNode(controller: self, presentationData: self.presentationData, configuration: self.configuration, beginDismiss: { [weak self] result in
+        self.displayNode = ContextControllerNode(controller: self, context: self.context, presentationData: self.presentationData, configuration: self.configuration, beginDismiss: { [weak self] result in
             self?.dismiss(result: result, completion: nil)
         }, recognizer: self.recognizer, gesture: self.gesture, beganAnimatingOut: { [weak self] in
             guard let strongSelf = self else {

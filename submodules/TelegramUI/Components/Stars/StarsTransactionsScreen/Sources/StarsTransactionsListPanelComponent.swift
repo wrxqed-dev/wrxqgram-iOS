@@ -16,7 +16,8 @@ import AvatarNode
 import BundleIconComponent
 import PhotoResources
 import StarsAvatarComponent
-import LottieComponent
+import GiftAnimationComponent
+import TelegramStringFormatting
 
 private extension StarsContext.State.Transaction {
     var extendedId: String {
@@ -300,12 +301,27 @@ final class StarsTransactionsListPanelComponent: Component {
                     var itemDate: String
                     var itemPeer = item.peer
                     var itemFile: TelegramMediaFile?
+                    var uniqueGift: StarGift.UniqueGift?
                     switch item.peer {
                     case let .peer(peer):
-                        if let starGift = item.starGift {
+                        if let months = item.premiumGiftMonths {
                             itemTitle = peer.displayTitle(strings: environment.strings, displayOrder: .firstLast)
-                            itemSubtitle = item.count > StarsAmount.zero ? environment.strings.Stars_Intro_Transaction_ConvertedGift : environment.strings.Stars_Intro_Transaction_Gift
-                            itemFile = starGift.file
+                            itemSubtitle = environment.strings.Stars_Intro_Transaction_TelegramPremium(months)
+                        } else if item.flags.contains(.isPaidMessage) {
+                            itemTitle = peer.displayTitle(strings: environment.strings, displayOrder: .firstLast)
+                            itemSubtitle = environment.strings.Stars_Intro_Transaction_PaidMessage(item.paidMessageCount ?? 1)
+                        } else if let starGift = item.starGift {
+                            if item.flags.contains(.isStarGiftUpgrade), case let .unique(gift) = starGift {
+                                itemTitle = "\(gift.title) #\(gift.number)"
+                                itemSubtitle = environment.strings.Stars_Intro_Transaction_GiftUpgrade
+                                uniqueGift = gift
+                            } else {
+                                itemTitle = peer.displayTitle(strings: environment.strings, displayOrder: .firstLast)
+                                itemSubtitle = item.count > StarsAmount.zero ? environment.strings.Stars_Intro_Transaction_ConvertedGift : environment.strings.Stars_Intro_Transaction_Gift
+                                if case let .generic(gift) = starGift {
+                                    itemFile = gift.file
+                                }
+                            }
                         } else if let _ = item.giveawayMessageId {
                             itemTitle = peer.displayTitle(strings: environment.strings, displayOrder: .firstLast)
                             itemSubtitle = environment.strings.Stars_Intro_Transaction_GiveawayPrize
@@ -340,8 +356,13 @@ final class StarsTransactionsListPanelComponent: Component {
                                 itemSubtitle = environment.strings.Stars_Intro_Transaction_Gift_Title
                                 itemPeer = .fragment
                             } else {
-                                itemTitle = environment.strings.Stars_Intro_Transaction_FragmentTopUp_Title
-                                itemSubtitle = environment.strings.Stars_Intro_Transaction_FragmentTopUp_Subtitle
+                                if (item.count.value < 0 && !item.flags.contains(.isRefund)) || (item.count.value > 0 && item.flags.contains(.isRefund)) {
+                                    itemTitle = environment.strings.Stars_Intro_Transaction_FragmentWithdrawal_Title
+                                    itemSubtitle = environment.strings.Stars_Intro_Transaction_FragmentWithdrawal_Subtitle
+                                } else {
+                                    itemTitle = environment.strings.Stars_Intro_Transaction_FragmentTopUp_Title
+                                    itemSubtitle = environment.strings.Stars_Intro_Transaction_FragmentTopUp_Subtitle
+                                }
                             }
                         } else {
                             if item.count > StarsAmount.zero && !item.flags.contains(.isRefund) {
@@ -371,16 +392,12 @@ final class StarsTransactionsListPanelComponent: Component {
                     }
                     
                     let itemLabel: NSAttributedString
-                    let labelString: String
+                    let formattedLabel = formatStarsAmountText(item.count, dateTimeFormat: environment.dateTimeFormat, showPlus: true)
                     
-                    let absCount = StarsAmount(value: abs(item.count.value), nanos: abs(item.count.nanos))
-                    let formattedLabel = presentationStringsFormattedNumber(absCount, environment.dateTimeFormat.groupingSeparator)
-                    if item.count < StarsAmount.zero {
-                        labelString = "- \(formattedLabel)"
-                    } else {
-                        labelString = "+ \(formattedLabel)"
-                    }
-                    itemLabel = NSAttributedString(string: labelString, font: Font.medium(fontBaseDisplaySize), textColor: labelString.hasPrefix("-") ? environment.theme.list.itemDestructiveColor : environment.theme.list.itemDisclosureActions.constructive.fillColor)
+                    let smallLabelFont = Font.with(size: floor(fontBaseDisplaySize / 17.0 * 13.0))
+                    let labelFont = Font.medium(fontBaseDisplaySize)
+                    let labelColor = formattedLabel.hasPrefix("-") ? environment.theme.list.itemDestructiveColor : environment.theme.list.itemDisclosureActions.constructive.fillColor
+                    itemLabel = tonAmountAttributedString(formattedLabel, integralFont: labelFont, fractionalFont: smallLabelFont, color: labelColor, decimalSeparator: environment.dateTimeFormat.decimalSeparator)
                     
                     var itemDateColor = environment.theme.list.itemSecondaryTextColor
                     itemDate = stringForMediumCompactDate(timestamp: item.date, strings: environment.strings, dateTimeFormat: environment.dateTimeFormat)
@@ -392,7 +409,7 @@ final class StarsTransactionsListPanelComponent: Component {
                         itemDate += " – \(environment.strings.Monetization_Transaction_Failed)"
                         itemDateColor = environment.theme.list.itemDestructiveColor
                     }
-                    
+                                        
                     var titleComponents: [AnyComponentWithIdentity<Empty>] = []
                     titleComponents.append(
                         AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(MultilineTextComponent(
@@ -409,24 +426,23 @@ final class StarsTransactionsListPanelComponent: Component {
                         if let itemFile {
                             subtitleComponent = AnyComponent(
                                 HStack([
-                                    AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(LottieComponent(
-                                        content: LottieComponent.ResourceContent(
+                                    AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(
+                                        GiftAnimationComponent(
                                             context: component.context,
+                                            theme: environment.theme,
                                             file: itemFile,
-                                            attemptSynchronously: false,
-                                            providesPlaceholder: true
-                                        ),
-                                        color: nil,
-                                        placeholderColor: environment.theme.list.mediaPlaceholderColor,
-                                        size: CGSize(width: 20.0, height: 20.0),
-                                        loop: false
-                                    ))),
-                                    AnyComponentWithIdentity(id: AnyHashable(1), component: AnyComponent(MultilineTextComponent(
-                                        text: .plain(NSAttributedString(
-                                            string: itemSubtitle,
-                                            font: Font.regular(fontBaseDisplaySize * 16.0 / 17.0),
-                                            textColor: environment.theme.list.itemPrimaryTextColor
-                                        ))
+                                            still: true,
+                                            size: CGSize(width: 20.0, height: 20.0)
+                                        )
+                                    )),
+                                    AnyComponentWithIdentity(id: AnyHashable(1), component: AnyComponent(
+                                        MultilineTextComponent(
+                                            text: .plain(NSAttributedString(
+                                                string: itemSubtitle,
+                                                font: Font.regular(fontBaseDisplaySize * 16.0 / 17.0),
+                                                textColor: environment.theme.list.itemPrimaryTextColor
+                                            )
+                                        )
                                     )))
                                 ], spacing: 2.0)
                             )
@@ -461,7 +477,7 @@ final class StarsTransactionsListPanelComponent: Component {
                             theme: environment.theme,
                             title: AnyComponent(VStack(titleComponents, alignment: .left, spacing: 2.0)),
                             contentInsets: UIEdgeInsets(top: 9.0, left: environment.containerInsets.left, bottom: 8.0, right: environment.containerInsets.right),
-                            leftIcon: .custom(AnyComponentWithIdentity(id: "avatar", component: AnyComponent(StarsAvatarComponent(context: component.context, theme: environment.theme, peer: itemPeer, photo: item.photo, media: item.media, backgroundColor: environment.theme.list.plainBackgroundColor))), false),
+                            leftIcon: .custom(AnyComponentWithIdentity(id: "avatar", component: AnyComponent(StarsAvatarComponent(context: component.context, theme: environment.theme, peer: itemPeer, photo: item.photo, media: item.media, uniqueGift: uniqueGift, backgroundColor: environment.theme.list.plainBackgroundColor))), false),
                             icon: nil,
                             accessory: .custom(ListActionItemComponent.CustomAccessory(component: AnyComponentWithIdentity(id: "label", component: AnyComponent(StarsLabelComponent(text: itemLabel))), insets: UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 16.0))),
                             action: { [weak self] _ in

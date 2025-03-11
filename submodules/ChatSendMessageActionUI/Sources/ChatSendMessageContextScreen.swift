@@ -455,6 +455,9 @@ final class ChatSendMessageContextScreenComponent: Component {
                 if sendMessage.hasTimers {
                     canSchedule = false
                 }
+                if let _ = sendMessage.sendPaidMessageStars {
+                    canSchedule = false
+                }
                 canMakePaidContent = sendMessage.canMakePaidContent
                 currentPrice = sendMessage.currentPrice
             case .editMessage:
@@ -650,6 +653,7 @@ final class ChatSendMessageContextScreenComponent: Component {
                 ), animated: !transition.animation.isImmediate)
             } else {
                 actionsStackNode = ContextControllerActionsStackNode(
+                    context: component.context,
                     getController: {
                         return nil
                     },

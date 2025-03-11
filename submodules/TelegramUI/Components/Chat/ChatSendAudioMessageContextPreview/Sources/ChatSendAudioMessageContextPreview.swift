@@ -488,6 +488,9 @@ public final class ChatSendGroupMediaMessageContextPreview: UIView, ChatSendMess
         }, openAgeRestrictedMessageMedia: { _, _ in
         }, playMessageEffect: { _ in
         }, editMessageFactCheck: { _ in
+        }, sendGift: { _ in
+        }, openUniqueGift: { _ in
+        }, openMessageFeeException: {
         }, requestMessageUpdate: { _, _ in
         }, cancelInteractiveKeyboardGestures: {
         }, dismissTextInput: {
@@ -520,6 +523,7 @@ public final class ChatSendGroupMediaMessageContextPreview: UIView, ChatSendMess
                 controllerInteraction: controllerInteraction,
                 message: message,
                 topMessage: message,
+                content: .message(message: message, read: true, selection: .none, attributes: entryAttributes, location: nil),
                 read: true,
                 chatLocation: .peer(id: self.context.account.peerId),
                 presentationData: chatPresentationData,

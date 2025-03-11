@@ -23,6 +23,7 @@ import StarsAvatarComponent
 import TelegramStringFormatting
 import ListItemComponentAdaptor
 import ItemListUI
+import StarsWithdrawalScreen
 
 private let initialSubscriptionsDisplayedLimit: Int32 = 3
 
@@ -31,27 +32,36 @@ final class StarsTransactionsScreenComponent: Component {
     
     let context: AccountContext
     let starsContext: StarsContext
+    let starsRevenueStatsContext: StarsRevenueStatsContext
     let subscriptionsContext: StarsSubscriptionsContext
     let openTransaction: (StarsContext.State.Transaction) -> Void
     let openSubscription: (StarsContext.State.Subscription) -> Void
     let buy: () -> Void
+    let withdraw: () -> Void
+    let showTimeoutTooltip: (Int32) -> Void
     let gift: () -> Void
     
     init(
         context: AccountContext,
         starsContext: StarsContext,
+        starsRevenueStatsContext: StarsRevenueStatsContext,
         subscriptionsContext: StarsSubscriptionsContext,
         openTransaction: @escaping (StarsContext.State.Transaction) -> Void,
         openSubscription: @escaping (StarsContext.State.Subscription) -> Void,
         buy: @escaping () -> Void,
+        withdraw: @escaping () -> Void,
+        showTimeoutTooltip: @escaping (Int32) -> Void,
         gift: @escaping () -> Void
     ) {
         self.context = context
         self.starsContext = starsContext
+        self.starsRevenueStatsContext = starsRevenueStatsContext
         self.subscriptionsContext = subscriptionsContext
         self.openTransaction = openTransaction
         self.openSubscription = openSubscription
         self.buy = buy
+        self.withdraw = withdraw
+        self.showTimeoutTooltip = showTimeoutTooltip
         self.gift = gift
     }
     
@@ -130,6 +140,9 @@ final class StarsTransactionsScreenComponent: Component {
         private var stateDisposable: Disposable?
         private var starsState: StarsContext.State?
         
+        private var revenueStateDisposable: Disposable?
+        private var revenueState: StarsRevenueStats?
+        
         private var previousBalance: StarsAmount?
         
         private var subscriptionsStateDisposable: Disposable?
@@ -186,6 +199,8 @@ final class StarsTransactionsScreenComponent: Component {
         
         deinit {
             self.stateDisposable?.dispose()
+            self.revenueStateDisposable?.dispose()
+            self.subscriptionsStateDisposable?.dispose()
         }
         
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -372,6 +387,18 @@ final class StarsTransactionsScreenComponent: Component {
                     }
                 })
                 
+                self.revenueStateDisposable = (component.starsRevenueStatsContext.state
+                |> deliverOnMainQueue).start(next: { [weak self] state in
+                    guard let self else {
+                        return
+                    }
+                    self.revenueState = state.stats
+                    
+                    if !self.isUpdating {
+                        self.state?.updated()
+                    }
+                })
+                
                 self.subscriptionsStateDisposable = (component.subscriptionsContext.state
                 |> deliverOnMainQueue).start(next: { [weak self] state in
                     guard let self else {
@@ -526,14 +553,15 @@ final class StarsTransactionsScreenComponent: Component {
                 containerSize: CGSize(width: 120.0, height: 100.0)
             )
             
+            let formattedBalance = formatStarsAmountText(self.starsState?.balance ?? StarsAmount.zero, dateTimeFormat: environment.dateTimeFormat)
+            let smallLabelFont = Font.regular(11.0)
+            let labelFont = Font.semibold(14.0)
+            let balanceText = tonAmountAttributedString(formattedBalance, integralFont: labelFont, fractionalFont: smallLabelFont, color: environment.theme.actionSheet.primaryTextColor, decimalSeparator: environment.dateTimeFormat.decimalSeparator)
+            
             let topBalanceValueSize = self.topBalanceValueView.update(
                 transition: .immediate,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(
-                        string: presentationStringsFormattedNumber(self.starsState?.balance ?? StarsAmount.zero, environment.dateTimeFormat.groupingSeparator),
-                        font: Font.semibold(14.0),
-                        textColor: environment.theme.actionSheet.primaryTextColor
-                    )),
+                    text: .plain(balanceText),
                     maximumNumberOfLines: 1
                 )),
                 environment: {},
@@ -602,6 +630,8 @@ final class StarsTransactionsScreenComponent: Component {
             contentHeight += descriptionSize.height
             contentHeight += 29.0
             
+            let withdrawAvailable = self.revenueState?.balances.withdrawEnabled ?? false
+                   
             let premiumConfiguration = PremiumConfiguration.with(appConfiguration: component.context.currentAppConfiguration.with { $0 })
             let balanceSize = self.balanceView.update(
                 transition: .immediate,
@@ -616,17 +646,38 @@ final class StarsTransactionsScreenComponent: Component {
                             dateTimeFormat: environment.dateTimeFormat,
                             count: self.starsState?.balance ?? StarsAmount.zero,
                             rate: nil,
-                            actionTitle: environment.strings.Stars_Intro_Buy,
-                            actionAvailable: !premiumConfiguration.areStarsDisabled,
+                            actionTitle: withdrawAvailable ? environment.strings.Stars_Intro_BuyShort : environment.strings.Stars_Intro_Buy,
+                            actionAvailable: !premiumConfiguration.areStarsDisabled && !premiumConfiguration.isPremiumDisabled,
                             actionIsEnabled: true,
+                            actionIcon: PresentationResourcesItemList.itemListRoundTopupIcon(environment.theme),
                             action: { [weak self] in
                                 guard let self, let component = self.component else {
                                     return
                                 }
                                 component.buy()
                             },
-                            buyAds: nil,
-                            additionalAction: premiumConfiguration.starsGiftsPurchaseAvailable ? AnyComponent(
+                            secondaryActionTitle: withdrawAvailable ? environment.strings.Stars_Intro_Withdraw : nil,
+                            secondaryActionIcon: withdrawAvailable ? PresentationResourcesItemList.itemListRoundWithdrawIcon(environment.theme) : nil,
+                            secondaryActionCooldownUntilTimestamp: self.revenueState?.balances.nextWithdrawalTimestamp,
+                            secondaryAction: withdrawAvailable ? { [weak self] in
+                                guard let self, let component = self.component else {
+                                    return
+                                }
+                                var remainingCooldownSeconds: Int32 = 0
+                                if let cooldownUntilTimestamp = self.revenueState?.balances.nextWithdrawalTimestamp {
+                                    remainingCooldownSeconds = cooldownUntilTimestamp - Int32(Date().timeIntervalSince1970)
+                                    remainingCooldownSeconds = max(0, remainingCooldownSeconds)
+                                    
+                                    if remainingCooldownSeconds > 0 {
+                                        component.showTimeoutTooltip(cooldownUntilTimestamp)
+                                    } else {
+                                        component.withdraw()
+                                    }
+                                } else {
+                                    component.withdraw()
+                                }
+                            } : nil,
+                            additionalAction: (premiumConfiguration.starsGiftsPurchaseAvailable && !premiumConfiguration.isPremiumDisabled) ? AnyComponent(
                                 Button(
                                     content: AnyComponent(
                                         HStack([
@@ -765,7 +816,7 @@ final class StarsTransactionsScreenComponent: Component {
                         if let photo = subscription.photo {
                             nameGroupComponent = AnyComponent(
                                 HStack([
-                                    AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(StarsAvatarComponent(context: component.context, theme: environment.theme, peer: nil, photo: photo, media: [], backgroundColor: .clear, size: CGSize(width: 19.0, height: 19.0)))),
+                                    AnyComponentWithIdentity(id: AnyHashable(0), component: AnyComponent(StarsAvatarComponent(context: component.context, theme: environment.theme, peer: nil, photo: photo, media: [], uniqueGift: nil, backgroundColor: .clear, size: CGSize(width: 19.0, height: 19.0)))),
                                     AnyComponentWithIdentity(id: AnyHashable(1), component: nameComponent)
                                 ], spacing: 6.0)
                             )
@@ -806,7 +857,7 @@ final class StarsTransactionsScreenComponent: Component {
                                 theme: environment.theme,
                                 title: AnyComponent(VStack(titleComponents, alignment: .left, spacing: 2.0)),
                                 contentInsets: UIEdgeInsets(top: 9.0, left: 0.0, bottom: 8.0, right: 0.0),
-                                leftIcon: .custom(AnyComponentWithIdentity(id: "avatar", component: AnyComponent(StarsAvatarComponent(context: component.context, theme: environment.theme, peer: .peer(subscription.peer), photo: nil, media: [], backgroundColor: environment.theme.list.plainBackgroundColor))), false),
+                                leftIcon: .custom(AnyComponentWithIdentity(id: "avatar", component: AnyComponent(StarsAvatarComponent(context: component.context, theme: environment.theme, peer: .peer(subscription.peer), photo: nil, media: [], uniqueGift: nil, backgroundColor: environment.theme.list.plainBackgroundColor))), false),
                                 icon: nil,
                                 accessory: .custom(ListActionItemComponent.CustomAccessory(component: labelComponent, insets: UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 16.0))),
                                 action: { [weak self] _ in
@@ -1043,25 +1094,33 @@ final class StarsTransactionsScreenComponent: Component {
 public final class StarsTransactionsScreen: ViewControllerComponentContainer {
     private let context: AccountContext
     private let starsContext: StarsContext
+    private let starsRevenueStatsContext: StarsRevenueStatsContext
     private let subscriptionsContext: StarsSubscriptionsContext
     
     private let options = Promise<[StarsTopUpOption]>()
     
     private let navigateDisposable = MetaDisposable()
     
+    private weak var tooltipScreen: UndoOverlayController?
+    private var timer: Foundation.Timer?
+    
     public init(context: AccountContext, starsContext: StarsContext, forceDark: Bool = false) {
         self.context = context
         self.starsContext = starsContext
         
+        self.starsRevenueStatsContext = context.engine.payments.peerStarsRevenueContext(peerId: context.account.peerId)
         self.subscriptionsContext = context.engine.payments.peerStarsSubscriptionsContext(starsContext: starsContext)
         
         var buyImpl: (() -> Void)?
+        var withdrawImpl: (() -> Void)?
+        var showTimeoutTooltipImpl: ((Int32) -> Void)?
         var giftImpl: (() -> Void)?
         var openTransactionImpl: ((StarsContext.State.Transaction) -> Void)?
         var openSubscriptionImpl: ((StarsContext.State.Subscription) -> Void)?
         super.init(context: context, component: StarsTransactionsScreenComponent(
-            context: context,
-            starsContext: starsContext,
+            context: self.context,
+            starsContext: self.starsContext,
+            starsRevenueStatsContext: self.starsRevenueStatsContext,
             subscriptionsContext: self.subscriptionsContext,
             openTransaction: { transaction in
                 openTransactionImpl?(transaction)
@@ -1071,6 +1130,12 @@ public final class StarsTransactionsScreen: ViewControllerComponentContainer {
             },
             buy: {
                 buyImpl?()
+            },
+            withdraw: {
+                withdrawImpl?()
+            },
+            showTimeoutTooltip: { timestamp in
+                showTimeoutTooltipImpl?(timestamp)
             },
             gift: {
                 giftImpl?()
@@ -1165,6 +1230,107 @@ public final class StarsTransactionsScreen: ViewControllerComponentContainer {
                 })
                 self.push(controller)
             })
+        }
+        
+        withdrawImpl = { [weak self] in
+            guard let self else {
+                return
+            }
+            let _ = (context.engine.peers.checkStarsRevenueWithdrawalAvailability()
+            |> deliverOnMainQueue).start(error: { [weak self] error in
+                guard let self else {
+                    return
+                }
+                switch error {
+                case .serverProvided:
+                    return
+                case .requestPassword:
+                    let _ = (self.starsRevenueStatsContext.state
+                    |> take(1)
+                    |> deliverOnMainQueue).start(next: { [weak self] state in
+                        guard let self else {
+                            return
+                        }
+                        let controller = self.context.sharedContext.makeStarsWithdrawalScreen(context: context, completion: { [weak self] amount in
+                            guard let self else {
+                                return
+                            }
+                            let controller = confirmStarsRevenueWithdrawalController(context: context, peerId: context.account.peerId, amount: amount, present: { [weak self] c, a in
+                                self?.present(c, in: .window(.root))
+                            }, completion: { [weak self] url in
+                                let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+                                context.sharedContext.openExternalUrl(context: context, urlContext: .generic, url: url, forceExternal: true, presentationData: presentationData, navigationController: nil, dismissInput: {})
+                                
+                                Queue.mainQueue().after(2.0) {
+                                    self?.starsRevenueStatsContext.reload()
+                                }
+                            })
+                            self.present(controller, in: .window(.root))
+                        })
+                        self.push(controller)
+                    })
+                default:
+                    let controller = starsRevenueWithdrawalController(context: context, peerId: context.account.peerId, amount: 0, initialError: error, present: { [weak self] c, a in
+                        self?.present(c, in: .window(.root))
+                    }, completion: { _ in
+                        
+                    })
+                    self.present(controller, in: .window(.root))
+                }
+            })
+        }
+        
+        showTimeoutTooltipImpl = { [weak self] cooldownUntilTimestamp in
+            guard let self, self.tooltipScreen == nil else {
+                return
+            }
+            
+            let remainingCooldownSeconds = cooldownUntilTimestamp - Int32(Date().timeIntervalSince1970)
+        
+            let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+            let content: UndoOverlayContent = .universal(
+                animation: "anim_clock",
+                scale: 0.058,
+                colors: [:],
+                title: nil,
+                text: presentationData.strings.Stars_Withdraw_Withdraw_ErrorTimeout(stringForRemainingTime(remainingCooldownSeconds)).string,
+                customUndoText: nil,
+                timeout: nil
+            )
+            let controller = UndoOverlayController(presentationData: presentationData, content: content, elevatedLayout: false, position: .bottom, animateInAsReplacement: false, action: { _ in
+                return true
+            })
+            self.tooltipScreen = controller
+            self.present(controller, in: .window(.root))
+            
+            if remainingCooldownSeconds < 3600 {
+                if self.timer == nil {
+                    self.timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true, block: { [weak self] _ in
+                        guard let self else {
+                            return
+                        }
+                        
+                        if let tooltipScreen = self.tooltipScreen {
+                            let remainingCooldownSeconds = cooldownUntilTimestamp - Int32(Date().timeIntervalSince1970)
+                            let content: UndoOverlayContent = .universal(
+                                animation: "anim_clock",
+                                scale: 0.058,
+                                colors: [:],
+                                title: nil,
+                                text: presentationData.strings.Stars_Withdraw_Withdraw_ErrorTimeout(stringForRemainingTime(remainingCooldownSeconds)).string,
+                                customUndoText: nil,
+                                timeout: nil
+                            )
+                            tooltipScreen.content = content
+                        } else {
+                            if let timer = self.timer {
+                                self.timer = nil
+                                timer.invalidate()
+                            }
+                        }
+                    })
+                }
+            }
         }
         
         giftImpl = { [weak self] in

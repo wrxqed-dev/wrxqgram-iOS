@@ -435,13 +435,14 @@ public struct NetworkInitializationArguments {
     public let voipVersions: [CallSessionManagerImplementationVersion]
     public let appData: Signal<Data?, NoError>
     public let externalRequestVerificationStream: Signal<[String: String], NoError>
+    public let externalRecaptchaRequestVerification: (String, String) -> Signal<String?, NoError>
     public let autolockDeadine: Signal<Int32?, NoError>
     public let encryptionProvider: EncryptionProvider
     public let deviceModelName:String?
     public let useBetaFeatures: Bool
     public let isICloudEnabled: Bool
     
-    public init(apiId: Int32, apiHash: String, languagesCategory: String, appVersion: String, voipMaxLayer: Int32, voipVersions: [CallSessionManagerImplementationVersion], appData: Signal<Data?, NoError>, externalRequestVerificationStream: Signal<[String: String], NoError>, autolockDeadine: Signal<Int32?, NoError>, encryptionProvider: EncryptionProvider, deviceModelName: String?, useBetaFeatures: Bool, isICloudEnabled: Bool) {
+    public init(apiId: Int32, apiHash: String, languagesCategory: String, appVersion: String, voipMaxLayer: Int32, voipVersions: [CallSessionManagerImplementationVersion], appData: Signal<Data?, NoError>, externalRequestVerificationStream: Signal<[String: String], NoError>, externalRecaptchaRequestVerification: @escaping (String, String) -> Signal<String?, NoError>, autolockDeadine: Signal<Int32?, NoError>, encryptionProvider: EncryptionProvider, deviceModelName: String?, useBetaFeatures: Bool, isICloudEnabled: Bool) {
         self.apiId = apiId
         self.apiHash = apiHash
         self.languagesCategory = languagesCategory
@@ -450,6 +451,7 @@ public struct NetworkInitializationArguments {
         self.voipVersions = voipVersions
         self.appData = appData
         self.externalRequestVerificationStream = externalRequestVerificationStream
+        self.externalRecaptchaRequestVerification = externalRecaptchaRequestVerification
         self.autolockDeadine = autolockDeadine
         self.encryptionProvider = encryptionProvider
         self.deviceModelName = deviceModelName

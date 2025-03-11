@@ -16,6 +16,7 @@ import ImageTransparency
 import ChatInputTextNode
 import TextInputMenu
 import ObjCRuntimeUtils
+import MultilineTextComponent
 
 public final class EmptyInputView: UIView, UIInputViewAudioFeedback {
     public var enableInputClicksWhenVisible: Bool {
@@ -36,11 +37,33 @@ public final class TextFieldComponent: Component {
         public var currentEmojiSuggestion: EmojiSuggestion?
         public var dismissedEmojiSuggestionPosition: EmojiSuggestion.Position?
         
+        public var currentEmojiSearch: EmojiSearch?
+        public var dismissedEmojiSearchPosition: EmojiSearch.Position?
+        
         public init() {
         }
     }
     
     public final class EmojiSuggestion {
+        public struct Position: Equatable {
+            public var range: NSRange
+            public var value: String
+        }
+        
+        public var localPosition: CGPoint
+        public var position: Position
+        public var disposable: Disposable?
+        public var value: Any?
+        
+        init(localPosition: CGPoint, position: Position) {
+            self.localPosition = localPosition
+            self.position = position
+            self.disposable = nil
+            self.value = nil
+        }
+    }
+    
+    public final class EmojiSearch {
         public struct Position: Equatable {
             public var range: NSRange
             public var value: String
@@ -128,10 +151,12 @@ public final class TextFieldComponent: Component {
     public let insets: UIEdgeInsets
     public let hideKeyboard: Bool
     public let customInputView: UIView?
+    public let placeholder: NSAttributedString?
     public let resetText: NSAttributedString?
     public let assumeIsEditing: Bool
     public let isOneLineWhenUnfocused: Bool
     public let characterLimit: Int?
+    public let enableInlineAnimations: Bool
     public let emptyLineHandling: EmptyLineHandling
     public let formatMenuAvailability: FormatMenuAvailability
     public let returnKeyType: UIReturnKeyType
@@ -152,10 +177,12 @@ public final class TextFieldComponent: Component {
         insets: UIEdgeInsets,
         hideKeyboard: Bool,
         customInputView: UIView?,
+        placeholder: NSAttributedString? = nil,
         resetText: NSAttributedString?,
         assumeIsEditing: Bool = false,
         isOneLineWhenUnfocused: Bool,
         characterLimit: Int? = nil,
+        enableInlineAnimations: Bool = true,
         emptyLineHandling: EmptyLineHandling = .allowed,
         formatMenuAvailability: FormatMenuAvailability,
         returnKeyType: UIReturnKeyType = .default,
@@ -175,10 +202,12 @@ public final class TextFieldComponent: Component {
         self.insets = insets
         self.hideKeyboard = hideKeyboard
         self.customInputView = customInputView
+        self.placeholder = placeholder
         self.resetText = resetText
         self.assumeIsEditing = assumeIsEditing
         self.isOneLineWhenUnfocused = isOneLineWhenUnfocused
         self.characterLimit = characterLimit
+        self.enableInlineAnimations = enableInlineAnimations
         self.emptyLineHandling = emptyLineHandling
         self.formatMenuAvailability = formatMenuAvailability
         self.returnKeyType = returnKeyType
@@ -220,6 +249,9 @@ public final class TextFieldComponent: Component {
         if lhs.customInputView !== rhs.customInputView {
             return false
         }
+        if lhs.placeholder != rhs.placeholder {
+            return false
+        }
         if lhs.resetText != rhs.resetText {
             return false
         }
@@ -230,6 +262,9 @@ public final class TextFieldComponent: Component {
             return false
         }
         if lhs.characterLimit != rhs.characterLimit {
+            return false
+        }
+        if lhs.enableInlineAnimations != rhs.enableInlineAnimations {
             return false
         }
         if lhs.emptyLineHandling != rhs.emptyLineHandling {
@@ -261,6 +296,7 @@ public final class TextFieldComponent: Component {
     }
     
     public final class View: UIView, UIScrollViewDelegate, ChatInputTextNodeDelegate {
+        private var placeholder: ComponentView<Empty>?
         private let textView: ChatInputTextView
         private let inputMenu: TextInputMenu
         
@@ -396,7 +432,7 @@ public final class TextFieldComponent: Component {
             }
             
             self.updateInputState { state in
-                if let characterLimit = component.characterLimit, state.inputText.length + text.length > characterLimit {
+                if let characterLimit = component.characterLimit, state.inputText.string.count + text.string.count > characterLimit {
                     return state
                 }
                 return state.insertText(text)
@@ -718,14 +754,21 @@ public final class TextFieldComponent: Component {
             }
             
             if let characterLimit = component.characterLimit {
-                let replacementString = text as NSString
                 let string = self.inputState.inputText.string as NSString
-                let deltaLength = replacementString.length - range.length
-                let resultingLength = string.length + deltaLength
+                let changingRangeString = string.substring(with: range)
+                
+                let deltaLength = text.count - changingRangeString.count
+                let resultingLength = (string as String).count + deltaLength
                 if resultingLength > characterLimit {
-                    let availableLength = characterLimit - string.length
+                    let availableLength = characterLimit - (string as String).count
                     if availableLength > 0 {
-                        var insertString = replacementString.substring(to: availableLength)
+                        var insertString = ""
+                        for i in 0 ..< availableLength {
+                            if text.count <= i {
+                                break
+                            }
+                            insertString.append(text[text.index(text.startIndex, offsetBy: i)])
+                        }
                         
                         switch component.emptyLineHandling {
                         case .allowed:
@@ -1164,6 +1207,18 @@ public final class TextFieldComponent: Component {
                 }
 
                 customEmojiContainerView.update(fontSize: component.fontSize, textColor: component.textColor, emojiRects: customEmojiRects)
+                
+                for (_, emojiView) in customEmojiContainerView.emojiLayers {
+                    if let emojiView = emojiView as? EmojiTextAttachmentView {
+                        if emojiView.isActive != component.enableInlineAnimations {
+                            emojiView.isUnique = !component.enableInlineAnimations
+                            emojiView.isActive = component.enableInlineAnimations
+                            if !emojiView.isActive {
+                                emojiView.resetToFirstFrame()
+                            }
+                        }
+                    }
+                }
             } else if let customEmojiContainerView = self.customEmojiContainerView {
                 customEmojiContainerView.removeFromSuperview()
                 self.customEmojiContainerView = nil
@@ -1211,6 +1266,51 @@ public final class TextFieldComponent: Component {
                                     emojiSuggestion.localPosition = trackingPosition
                                     emojiSuggestion.position = emojiSuggestionPosition
                                     component.externalState.dismissedEmojiSuggestionPosition = nil
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if let index = selectedSubstring.string.range(of: ":", options: .backwards) {
+                        let queryRange = index.upperBound ..< selectedSubstring.string.endIndex
+                        let query = String(selectedSubstring.string[queryRange])
+                        if !query.isEmpty && !query.contains(where: { c in
+                            for s in c.unicodeScalars {
+                                if CharacterSet.whitespacesAndNewlines.contains(s) {
+                                    return true
+                                }
+                            }
+                            return false
+                        }) {
+                            let beginning = self.textView.beginningOfDocument
+                            let characterRange = NSRange(queryRange, in: selectedSubstring.string)
+                            
+                            let start = self.textView.position(from: beginning, offset: characterRange.location)
+                            let end = self.textView.position(from: beginning, offset: characterRange.location + characterRange.length)
+                            
+                            if let start = start, let end = end, let textRange = self.textView.textRange(from: start, to: end) {
+                                let selectionRects = self.textView.selectionRects(for: textRange)
+                                let emojiSearchPosition = EmojiSearch.Position(range: characterRange, value: query)
+                                
+                                hasTracking = true
+                                
+                                if let trackingRect = selectionRects.first?.rect {
+                                    let trackingPosition = CGPoint(x: trackingRect.midX, y: trackingRect.minY)
+                                    if component.externalState.dismissedEmojiSearchPosition == emojiSearchPosition {
+                                    } else {
+                                        hasTrackingView = true
+                                        
+                                        let emojiSearch: EmojiSearch
+                                        if let current = component.externalState.currentEmojiSearch, current.position.value == emojiSearchPosition.value {
+                                            emojiSearch = current
+                                        } else {
+                                            emojiSearch = EmojiSearch(localPosition: trackingPosition, position: emojiSearchPosition)
+                                            component.externalState.currentEmojiSearch = emojiSearch
+                                        }
+                                        emojiSearch.localPosition = trackingPosition
+                                        emojiSearch.position = emojiSearchPosition
+                                        component.externalState.dismissedEmojiSearchPosition = nil
+                                    }
                                 }
                             }
                         }
@@ -1294,7 +1394,9 @@ public final class TextFieldComponent: Component {
                         return UIView()
                     }
                     let pointSize = floor(24.0 * 1.3)
-                    return EmojiTextAttachmentView(context: component.context, userLocation: .other, emoji: emoji, file: emoji.file, cache: component.context.animationCache, renderer: component.context.animationRenderer, placeholderColor: UIColor.white.withAlphaComponent(0.12), pointSize: CGSize(width: pointSize, height: pointSize))
+                    let emojiView = EmojiTextAttachmentView(context: component.context, userLocation: .other, emoji: emoji, file: emoji.file, cache: component.context.animationCache, renderer: component.context.animationRenderer, placeholderColor: UIColor.white.withAlphaComponent(0.12), pointSize: CGSize(width: pointSize, height: pointSize))
+                    emojiView.updateTextColor(component.textColor)
+                    return emojiView
                 }
                 
                 self.chatInputTextNodeDidUpdateText()
@@ -1340,6 +1442,40 @@ public final class TextFieldComponent: Component {
             self.textView.frame = textFrame
             self.textView.updateLayout(size: textFrame.size)
             self.textView.panGestureRecognizer.isEnabled = isEditing
+            
+            if let placeholderValue = component.placeholder {
+                var placeholderTransition = transition
+                let placeholder: ComponentView<Empty>
+                if let current = self.placeholder {
+                    placeholder = current
+                } else {
+                    placeholderTransition = placeholderTransition.withAnimation(.none)
+                    placeholder = ComponentView()
+                    self.placeholder = placeholder
+                }
+                let placeholderSize = placeholder.update(
+                    transition: .immediate,
+                    component: AnyComponent(MultilineTextComponent(
+                        text: .plain(placeholderValue)
+                    )),
+                    environment: {},
+                    containerSize: textFrame.size
+                )
+                let placeholderFrame = CGRect(origin: CGPoint(x: textFrame.minX, y: textFrame.minY + floor((textFrame.height - placeholderSize.height) * 0.5) - 1.0), size: placeholderSize)
+                if let placeholderView = placeholder.view {
+                    if placeholderView.superview == nil {
+                        placeholderView.layer.anchorPoint = CGPoint()
+                        self.insertSubview(placeholderView, belowSubview: self.textView)
+                    }
+                    placeholderTransition.setPosition(view: placeholderView, position: placeholderFrame.origin)
+                    placeholderView.bounds = CGRect(origin: CGPoint(), size: placeholderFrame.size)
+                    
+                    placeholderView.isHidden = self.textView.textStorage.length != 0
+                }
+            } else if let placeholder = self.placeholder {
+                self.placeholder = nil
+                placeholder.view?.removeFromSuperview()
+            }
             
             self.updateEmojiSuggestion(transition: .immediate)
             

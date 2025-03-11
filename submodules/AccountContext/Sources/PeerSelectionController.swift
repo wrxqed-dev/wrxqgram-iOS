@@ -28,7 +28,6 @@ public struct ChatListNodePeersFilter: OptionSet {
     public static let removeSearchHeader = ChatListNodePeersFilter(rawValue: 1 << 9)
     
     public static let excludeDisabled = ChatListNodePeersFilter(rawValue: 1 << 10)
-    public static let includeSavedMessages = ChatListNodePeersFilter(rawValue: 1 << 11)
     
     public static let excludeChannels = ChatListNodePeersFilter(rawValue: 1 << 12)
     public static let onlyGroupsAndChannels = ChatListNodePeersFilter(rawValue: 1 << 13)
@@ -36,6 +35,8 @@ public struct ChatListNodePeersFilter: OptionSet {
     public static let excludeGroups = ChatListNodePeersFilter(rawValue: 1 << 14)
     public static let excludeUsers = ChatListNodePeersFilter(rawValue: 1 << 15)
     public static let excludeBots = ChatListNodePeersFilter(rawValue: 1 << 16)
+    
+    public static let includeSelf = ChatListNodePeersFilter(rawValue: 1 << 7)
 }
 
 
@@ -59,6 +60,7 @@ public final class PeerSelectionControllerParams {
     public let createNewGroup: (() -> Void)?
     public let pretendPresentedInModal: Bool
     public let multipleSelection: Bool
+    public let multipleSelectionLimit: Int32?
     public let forwardedMessageIds: [EngineMessage.Id]
     public let hasTypeHeaders: Bool
     public let selectForumThreads: Bool
@@ -80,6 +82,7 @@ public final class PeerSelectionControllerParams {
         createNewGroup: (() -> Void)? = nil,
         pretendPresentedInModal: Bool = false,
         multipleSelection: Bool = false,
+        multipleSelectionLimit: Int32? = nil,
         forwardedMessageIds: [EngineMessage.Id] = [],
         hasTypeHeaders: Bool = false,
         selectForumThreads: Bool = false,
@@ -100,6 +103,7 @@ public final class PeerSelectionControllerParams {
         self.createNewGroup = createNewGroup
         self.pretendPresentedInModal = pretendPresentedInModal
         self.multipleSelection = multipleSelection
+        self.multipleSelectionLimit = multipleSelectionLimit
         self.forwardedMessageIds = forwardedMessageIds
         self.hasTypeHeaders = hasTypeHeaders
         self.selectForumThreads = selectForumThreads

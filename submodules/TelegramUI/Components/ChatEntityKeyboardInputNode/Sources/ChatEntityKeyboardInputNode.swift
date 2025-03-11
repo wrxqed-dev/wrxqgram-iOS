@@ -19,7 +19,6 @@ import PremiumUI
 import AudioToolbox
 import UndoUI
 import ContextUI
-import GalleryUI
 import TelegramPresentationData
 import TelegramNotices
 import StickerPeekUI
@@ -29,7 +28,6 @@ import MultiplexedVideoNode
 import ChatControllerInteraction
 import FeaturedStickersScreen
 import Pasteboard
-import StickerPackPreviewUI
 import EntityKeyboardGifContent
 import LegacyMessageInputPanelInputView
 import AttachmentTextInputPanelNode
@@ -338,7 +336,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                         continue
                     }
                     
-                    availableGifSearchEmojies.append(EntityKeyboardComponent.GifSearchEmoji(emoji: reaction, file: file, title: title))
+                    availableGifSearchEmojies.append(EntityKeyboardComponent.GifSearchEmoji(emoji: reaction, file: file._parse(), title: title))
                 }
             }
                         
@@ -647,30 +645,11 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                                             parentInputInteraction: emojiInputInteraction
                                         ))
                                     }
-                                    
-                                    /*let controller = StickerPackScreen(
-                                        context: context,
-                                        updatedPresentationData: controllerInteraction.updatedPresentationData,
-                                        mode: .default,
-                                        mainStickerPack: .id(id: featuredStickerPack.info.id.id, accessHash: featuredStickerPack.info.accessHash),
-                                        stickerPacks: [.id(id: featuredStickerPack.info.id.id, accessHash: featuredStickerPack.info.accessHash)],
-                                        loadedStickerPacks: [.result(info: featuredStickerPack.info, items: featuredStickerPack.topItems, installed: false)],
-                                        parentNavigationController: controllerInteraction.navigationController(),
-                                        sendSticker: nil,
-                                        sendEmoji: { [weak interfaceInteraction] text, emojiAttribute in
-                                            guard let interfaceInteraction else {
-                                                return
-                                            }
-                                            interfaceInteraction.insertText(NSAttributedString(string: text, attributes: [ChatTextInputAttributes.customEmoji: emojiAttribute]))
-                                        }
-                                    )
-                                    controllerInteraction.presentController(controller, nil)*/
-                                    
                                     break
                                 }
                             }
                         })
-                    } else if let file = item.itemFile {
+                    } else if let file = item.itemFile?._parse() {
                         var text = "."
                         var emojiAttribute: ChatTextInputTextCustomEmojiAttribute?
                         loop: for attribute in file.attributes {
@@ -991,11 +970,11 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                                     if itemFile.isPremiumEmoji && !hasPremium {
                                         continue
                                     }
-                                    let animationData = EntityKeyboardAnimationData(file: itemFile)
+                                    let animationData = EntityKeyboardAnimationData(file: TelegramMediaFile.Accessor(itemFile))
                                     let item = EmojiPagerContentComponent.Item(
                                         animationData: animationData,
                                         content: .animation(animationData),
-                                        itemFile: itemFile,
+                                        itemFile: TelegramMediaFile.Accessor(itemFile),
                                         subgroupId: nil,
                                         icon: .none,
                                         tintMode: animationData.isTemplate ? .primary : .none
@@ -1107,11 +1086,11 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                                 continue
                             }
                             existingIds.insert(itemFile.fileId)
-                            let animationData = EntityKeyboardAnimationData(file: itemFile)
+                            let animationData = EntityKeyboardAnimationData(file: TelegramMediaFile.Accessor(itemFile))
                             let item = EmojiPagerContentComponent.Item(
                                 animationData: animationData,
                                 content: .animation(animationData),
-                                itemFile: itemFile,
+                                itemFile: TelegramMediaFile.Accessor(itemFile),
                                 subgroupId: nil,
                                 icon: .none,
                                 tintMode: animationData.isTemplate ? .primary : .none
@@ -1198,7 +1177,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                     guard let interaction else {
                         return
                     }
-                    guard let file = item.itemFile else {
+                    guard let file = item.itemFile?._parse() else {
                         if case .icon(.add) = item.content {
                             interaction.openStickerEditor()
                         }
@@ -1395,6 +1374,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                         mainStickerPack: packReference,
                         stickerPacks: [packReference],
                         loadedStickerPacks: [],
+                        actionTitle: nil,
                         isEditing: true,
                         expandIfNeeded: true,
                         parentNavigationController: interaction.getNavigationController(),
@@ -1453,11 +1433,12 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                                 continue
                             }
                             existingIds.insert(itemFile.fileId)
-                            let animationData = EntityKeyboardAnimationData(file: itemFile)
+                            let animationData = EntityKeyboardAnimationData(file: TelegramMediaFile.Accessor(itemFile))
                             let item = EmojiPagerContentComponent.Item(
                                 animationData: animationData,
                                 content: .animation(animationData),
-                                itemFile: itemFile, subgroupId: nil,
+                                itemFile: TelegramMediaFile.Accessor(itemFile),
+                                subgroupId: nil,
                                 icon: itemFile.isPremiumSticker ? .premium : .none,
                                 tintMode: animationData.isTemplate ? .primary : .none
                             )
@@ -1931,6 +1912,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                         interaction: interaction,
                         inputNodeInteraction: inputNodeInteraction,
                         mode: mappedMode,
+                        batchVideoRenderingContext: nil,
                         trendingGifsPromise: trendingGifsPromise,
                         cancel: {
                         },
@@ -2131,9 +2113,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
             
             let message = Message(stableId: 0, stableVersion: 0, id: MessageId(peerId: PeerId(0), namespace: Namespaces.Message.Local, id: 0), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: 0, flags: [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: nil, text: "", attributes: [], media: [file.media], peers: SimpleDictionary(), associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
             
-            let gallery = GalleryController(context: strongSelf.context, source: .standaloneMessage(message, nil), streamSingleVideo: true, replaceRootController: { _, _ in
-            }, baseNavigationController: nil)
-            gallery.setHintWillBePresentedInPreviewingContext(true)
+            let gallery = strongSelf.context.sharedContext.makeGalleryController(context: strongSelf.context, source: .standaloneMessage(message, nil), streamSingleVideo: true, isPreview: true)
             
             var items: [ContextMenuItem] = []
             items.append(.action(ContextMenuActionItem(text: presentationData.strings.MediaPicker_Send, icon: { theme in
@@ -2173,7 +2153,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
                             })))
                         }
                     
-                        if isSaved {
+                        if isSaved && interfaceState.sendPaidMessageStars == nil {
                             items.append(.action(ContextMenuActionItem(text: presentationData.strings.Conversation_SendMessage_ScheduleMessage, icon: { theme in
                                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Menu/ScheduleIcon"), color: theme.actionSheet.primaryTextColor)
                             }, action: { [weak self] _, f in
@@ -2282,7 +2262,7 @@ private final class ContextControllerContentSourceImpl: ContextControllerContent
     }
     
     func animatedIn() {
-        if let controller = self.controller as? GalleryController {
+        if let controller = self.controller as? GalleryControllerProtocol {
             controller.viewDidAppear(false)
         }
     }
@@ -2338,10 +2318,10 @@ public final class EntityInputView: UIInputView, AttachmentTextInputPanelInputVi
                     
                     if groupId == AnyHashable("featuredTop") {
                     } else {
-                        if let file = item.itemFile {
+                        if let file = item.itemFile?._parse() {
                             var text = "."
                             var emojiAttribute: ChatTextInputTextCustomEmojiAttribute?
-                        loop: for attribute in file.attributes {
+                            loop: for attribute in file.attributes {
                             switch attribute {
                             case let .CustomEmoji(_, _, displayText, _):
                                 text = displayText
@@ -2579,7 +2559,8 @@ public final class EntityInputView: UIInputView, AttachmentTextInputPanelInputVi
             isGeneralThreadClosed: nil,
             replyMessage: nil,
             accountPeerColor: nil,
-            businessIntro: nil
+            businessIntro: nil,
+            starGiftsAvailable: false
         )
 
         let _ = inputNode.updateLayout(
@@ -2783,6 +2764,13 @@ public final class EmojiContentPeekBehaviorImpl: EmojiContentPeekBehavior {
                         }))
                     }
                 } else {
+                    let sendPaidMessageStars: Signal<StarsAmount?, NoError>
+                    if let chatPeerId = strongSelf.chatPeerId {
+                        sendPaidMessageStars = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.SendPaidMessageStars(id: chatPeerId))
+                    } else {
+                        sendPaidMessageStars = .single(nil)
+                    }
+                    
                     return combineLatest(
                         context.engine.stickers.isStickerSaved(id: file.fileId),
                         context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: accountPeerId)) |> map { peer -> Bool in
@@ -2791,10 +2779,11 @@ public final class EmojiContentPeekBehaviorImpl: EmojiContentPeekBehavior {
                                 hasPremium = true
                             }
                             return hasPremium
-                        }
+                        },
+                        sendPaidMessageStars
                     )
                     |> deliverOnMainQueue
-                    |> map { [weak itemLayer] isStarred, hasPremium -> (UIView, CGRect, PeekControllerContent)? in
+                    |> map { [weak itemLayer] isStarred, hasPremium, sendPaidMessageStars -> (UIView, CGRect, PeekControllerContent)? in
                         guard let strongSelf = self, let itemLayer = itemLayer else {
                             return nil
                         }
@@ -2824,18 +2813,20 @@ public final class EmojiContentPeekBehaviorImpl: EmojiContentPeekBehavior {
                                     })))
                                 }
                                 
-                                menuItems.append(.action(ContextMenuActionItem(text: presentationData.strings.Conversation_SendMessage_ScheduleMessage, icon: { theme in
-                                    return generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Menu/ScheduleIcon"), color: theme.actionSheet.primaryTextColor)
-                                }, action: { _, f in
-                                    if let strongSelf = self, let peekController = strongSelf.peekController {
-                                        if let animationNode = (peekController.contentNode as? StickerPreviewPeekContentNode)?.animationNode {
-                                            let _ = sendSticker(.standalone(media: file), false, true, nil, false, animationNode.view, animationNode.bounds, nil)
-                                        } else if let imageNode = (peekController.contentNode as? StickerPreviewPeekContentNode)?.imageNode {
-                                            let _ = sendSticker(.standalone(media: file), false, true, nil, false, imageNode.view, imageNode.bounds, nil)
+                                if sendPaidMessageStars == nil {
+                                    menuItems.append(.action(ContextMenuActionItem(text: presentationData.strings.Conversation_SendMessage_ScheduleMessage, icon: { theme in
+                                        return generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Menu/ScheduleIcon"), color: theme.actionSheet.primaryTextColor)
+                                    }, action: { _, f in
+                                        if let strongSelf = self, let peekController = strongSelf.peekController {
+                                            if let animationNode = (peekController.contentNode as? StickerPreviewPeekContentNode)?.animationNode {
+                                                let _ = sendSticker(.standalone(media: file), false, true, nil, false, animationNode.view, animationNode.bounds, nil)
+                                            } else if let imageNode = (peekController.contentNode as? StickerPreviewPeekContentNode)?.imageNode {
+                                                let _ = sendSticker(.standalone(media: file), false, true, nil, false, imageNode.view, imageNode.bounds, nil)
+                                            }
                                         }
-                                    }
-                                    f(.default)
-                                })))
+                                        f(.default)
+                                    })))
+                                }
                             }
                             
                             menuItems.append(
@@ -2883,7 +2874,7 @@ public final class EmojiContentPeekBehaviorImpl: EmojiContentPeekBehavior {
                                                     return
                                                 }
                                                 
-                                                let controller = strongSelf.context.sharedContext.makeStickerPackScreen(context: context, updatedPresentationData: nil, mainStickerPack: packReference, stickerPacks: [packReference], loadedStickerPacks: [], isEditing: false, expandIfNeeded: false, parentNavigationController: interaction.navigationController(), sendSticker: { file, sourceView, sourceRect in
+                                                let controller = strongSelf.context.sharedContext.makeStickerPackScreen(context: context, updatedPresentationData: nil, mainStickerPack: packReference, stickerPacks: [packReference], loadedStickerPacks: [], actionTitle: nil, isEditing: false, expandIfNeeded: false, parentNavigationController: interaction.navigationController(), sendSticker: { file, sourceView, sourceRect in
                                                     sendSticker(file, false, false, nil, false, sourceView, sourceRect, nil)
                                                     return true
                                                 }, actionPerformed: nil)

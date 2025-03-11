@@ -7,7 +7,6 @@ import TelegramCore
 import SwiftSignalKit
 import TelegramUIPreferences
 import AccountContext
-import ShareController
 import StickerResources
 import AlertUI
 import PresentationDataUtils
@@ -116,15 +115,20 @@ public final class StickerPackPreviewController: ViewController, StandalonePrese
                 }
                 
                 if let stickerPackContentsValue = strongSelf.stickerPackContentsValue, case let .result(info, _, _) = stickerPackContentsValue, !info.shortName.isEmpty {
-                    let shareController = ShareController(context: strongSelf.context, subject: .url("https://t.me/addstickers/\(info.shortName)"), externalShare: true)
-                    
                     let parentNavigationController = strongSelf.parentNavigationController
-                    shareController.actionCompleted = { [weak parentNavigationController] in
-                        if let parentNavigationController = parentNavigationController, let controller = parentNavigationController.topViewController as? ViewController {
-                            let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
-                            controller.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
+                    let shareController = strongSelf.context.sharedContext.makeShareController(
+                        context: strongSelf.context,
+                        subject: .url("https://t.me/addstickers/\(info.shortName)"),
+                        forceExternal: true,
+                        shareStory: nil,
+                        enqueued: nil,
+                        actionCompleted: { [weak parentNavigationController] in
+                            if let parentNavigationController = parentNavigationController, let controller = parentNavigationController.topViewController as? ViewController {
+                                let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
+                                controller.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
+                            }
                         }
-                    }
+                    )
                     strongSelf.present(shareController, in: .window(.root))
                     strongSelf.dismiss()
                 }
@@ -214,11 +218,12 @@ public final class StickerPackPreviewController: ViewController, StandalonePrese
                     let topItems = items.prefix(16)
                     for item in topItems {
                         if item.file.isAnimatedSticker {
+                            let itemFile = item.file._parse()
                             let signal = Signal<Bool, NoError> { subscriber in
-                                let fetched = fetchedMediaResource(mediaBox: account.postbox.mediaBox, userLocation: .other, userContentType: .sticker, reference: FileMediaReference.standalone(media: item.file).resourceReference(item.file.resource)).start()
-                                let data = account.postbox.mediaBox.resourceData(item.file.resource).start()
+                                let fetched = fetchedMediaResource(mediaBox: account.postbox.mediaBox, userLocation: .other, userContentType: .sticker, reference: FileMediaReference.standalone(media: itemFile).resourceReference(itemFile.resource)).start()
+                                let data = account.postbox.mediaBox.resourceData(itemFile.resource).start()
                                 let dimensions = item.file.dimensions ?? PixelDimensions(width: 512, height: 512)
-                                let fetchedRepresentation = chatMessageAnimatedStickerDatas(postbox: account.postbox, userLocation: .other, file: item.file, small: false, size: dimensions.cgSize.aspectFitted(CGSize(width: 160.0, height: 160.0)), fetched: true, onlyFullSize: false, synchronousLoad: false).start(next: { next in
+                                let fetchedRepresentation = chatMessageAnimatedStickerDatas(postbox: account.postbox, userLocation: .other, file: itemFile, small: false, size: dimensions.cgSize.aspectFitted(CGSize(width: 160.0, height: 160.0)), fetched: true, onlyFullSize: false, synchronousLoad: false).start(next: { next in
                                     let hasContent = next._0 != nil || next._1 != nil
                                     subscriber.putNext(hasContent)
                                     if hasContent {
@@ -290,79 +295,4 @@ public final class StickerPackPreviewController: ViewController, StandalonePrese
         
         self.controllerNode.containerLayoutUpdated(layout, navigationBarHeight: self.navigationLayout(layout: layout).navigationFrame.maxY, transition: transition)
     }
-}
-
-public func preloadedStickerPackThumbnail(account: Account, info: StickerPackCollectionInfo, items: [ItemCollectionItem]) -> Signal<Bool, NoError> {
-    if let thumbnail = info.thumbnail {
-        let signal = Signal<Bool, NoError> { subscriber in
-            let fetched = fetchedMediaResource(mediaBox: account.postbox.mediaBox, userLocation: .other, userContentType: .sticker, reference: .stickerPackThumbnail(stickerPack: .id(id: info.id.id, accessHash: info.accessHash), resource: thumbnail.resource)).start()
-            let dataDisposable: Disposable
-            if thumbnail.typeHint != .generic {
-                dataDisposable = chatMessageAnimationData(mediaBox: account.postbox.mediaBox, resource: thumbnail.resource, isVideo: thumbnail.typeHint == .video, width: 80, height: 80, synchronousLoad: false).start(next: { data in
-                    if data.complete {
-                        subscriber.putNext(true)
-                        subscriber.putCompletion()
-                    } else {
-                        subscriber.putNext(false)
-                    }
-                })
-            } else {
-                dataDisposable = account.postbox.mediaBox.resourceData(thumbnail.resource, option: .incremental(waitUntilFetchStatus: false)).start(next: { data in
-                    if data.complete {
-                        subscriber.putNext(true)
-                        subscriber.putCompletion()
-                    } else {
-                        subscriber.putNext(false)
-                    }
-                })
-            }
-            return ActionDisposable {
-                fetched.dispose()
-                dataDisposable.dispose()
-            }
-        }
-        return signal
-    }
-    
-    if let item = items.first as? StickerPackItem {
-        if item.file.isAnimatedSticker {
-            let signal = Signal<Bool, NoError> { subscriber in
-                let fetched = fetchedMediaResource(mediaBox: account.postbox.mediaBox, userLocation: .other, userContentType: .sticker, reference: FileMediaReference.standalone(media: item.file).resourceReference(item.file.resource)).start()
-                let data = account.postbox.mediaBox.resourceData(item.file.resource).start()
-                let dimensions = item.file.dimensions ?? PixelDimensions(width: 512, height: 512)
-                let fetchedRepresentation = chatMessageAnimatedStickerDatas(postbox: account.postbox, userLocation: .other, file: item.file, small: false, size: dimensions.cgSize.aspectFitted(CGSize(width: 160.0, height: 160.0)), fetched: true, onlyFullSize: false, synchronousLoad: false).start(next: { next in
-                    let hasContent = next._0 != nil || next._1 != nil
-                    subscriber.putNext(hasContent)
-                    if hasContent {
-                        subscriber.putCompletion()
-                    }
-                })
-                return ActionDisposable {
-                    fetched.dispose()
-                    data.dispose()
-                    fetchedRepresentation.dispose()
-                }
-            }
-            return signal
-        } else {
-            let signal = Signal<Bool, NoError> { subscriber in
-                let data = account.postbox.mediaBox.resourceData(item.file.resource).start()
-                let dimensions = item.file.dimensions ?? PixelDimensions(width: 512, height: 512)
-                let fetchedRepresentation = chatMessageAnimatedStickerDatas(postbox: account.postbox, userLocation: .other, file: item.file, small: true, size: dimensions.cgSize.aspectFitted(CGSize(width: 160.0, height: 160.0)), fetched: true, onlyFullSize: false, synchronousLoad: false).start(next: { next in
-                    let hasContent = next._0 != nil || next._1 != nil
-                    subscriber.putNext(hasContent)
-                    if hasContent {
-                        subscriber.putCompletion()
-                    }
-                })
-                return ActionDisposable {
-                    data.dispose()
-                    fetchedRepresentation.dispose()
-                }
-            }
-            return signal
-        }
-    }
-    
-    return .single(true)
 }
