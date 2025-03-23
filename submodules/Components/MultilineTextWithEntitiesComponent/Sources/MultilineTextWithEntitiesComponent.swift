@@ -30,7 +30,10 @@ public final class MultilineTextWithEntitiesComponent: Component {
     public let textShadowColor: UIColor?
     public let textStroke: (UIColor, CGFloat)?
     public let highlightColor: UIColor?
+    public let highlightInset: UIEdgeInsets
     public let handleSpoilers: Bool
+    public let manualVisibilityControl: Bool
+    public let resetAnimationsOnVisibilityChange: Bool
     public let highlightAction: (([NSAttributedString.Key: Any]) -> NSAttributedString.Key?)?
     public let tapAction: (([NSAttributedString.Key: Any], Int) -> Void)?
     public let longTapAction: (([NSAttributedString.Key: Any], Int) -> Void)?
@@ -51,7 +54,10 @@ public final class MultilineTextWithEntitiesComponent: Component {
         textShadowColor: UIColor? = nil,
         textStroke: (UIColor, CGFloat)? = nil,
         highlightColor: UIColor? = nil,
+        highlightInset: UIEdgeInsets = .zero,
         handleSpoilers: Bool = false,
+        manualVisibilityControl: Bool = false,
+        resetAnimationsOnVisibilityChange: Bool = false,
         highlightAction: (([NSAttributedString.Key: Any]) -> NSAttributedString.Key?)? = nil,
         tapAction: (([NSAttributedString.Key: Any], Int) -> Void)? = nil,
         longTapAction: (([NSAttributedString.Key: Any], Int) -> Void)? = nil
@@ -71,8 +77,11 @@ public final class MultilineTextWithEntitiesComponent: Component {
         self.textShadowColor = textShadowColor
         self.textStroke = textStroke
         self.highlightColor = highlightColor
+        self.highlightInset = highlightInset
         self.highlightAction = highlightAction
         self.handleSpoilers = handleSpoilers
+        self.manualVisibilityControl = manualVisibilityControl
+        self.resetAnimationsOnVisibilityChange = resetAnimationsOnVisibilityChange
         self.tapAction = tapAction
         self.longTapAction = longTapAction
     }
@@ -105,6 +114,12 @@ public final class MultilineTextWithEntitiesComponent: Component {
         if lhs.handleSpoilers != rhs.handleSpoilers {
             return false
         }
+        if lhs.manualVisibilityControl != rhs.manualVisibilityControl {
+            return false
+        }
+        if lhs.resetAnimationsOnVisibilityChange != rhs.resetAnimationsOnVisibilityChange {
+            return false
+        }
         if let lhsTextShadowColor = lhs.textShadowColor, let rhsTextShadowColor = rhs.textShadowColor {
             if !lhsTextShadowColor.isEqual(rhsTextShadowColor) {
                 return false
@@ -132,6 +147,10 @@ public final class MultilineTextWithEntitiesComponent: Component {
             return false
         }
         
+        if lhs.highlightInset != rhs.highlightInset {
+            return false
+        }
+        
         return true
     }
     
@@ -149,6 +168,10 @@ public final class MultilineTextWithEntitiesComponent: Component {
         
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+        
+        public func updateVisibility(_ isVisible: Bool) {
+            self.textNode.visibility = isVisible
         }
         
         public func update(component: MultilineTextWithEntitiesComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
@@ -173,9 +196,12 @@ public final class MultilineTextWithEntitiesComponent: Component {
             self.textNode.textShadowColor = component.textShadowColor
             self.textNode.textStroke = component.textStroke
             self.textNode.linkHighlightColor = component.highlightColor
+            self.textNode.linkHighlightInset = component.highlightInset
             self.textNode.highlightAttributeAction = component.highlightAction
             self.textNode.tapAttributeAction = component.tapAction
             self.textNode.longTapAttributeAction = component.longTapAction
+            
+            self.textNode.resetEmojiToFirstFrameAutomatically = component.resetAnimationsOnVisibilityChange
                                     
             if case let .curve(duration, _) = transition.animation, let previousText = previousText, previousText != attributedString.string {
                 if let snapshotView = self.snapshotContentTree() {
@@ -189,7 +215,9 @@ public final class MultilineTextWithEntitiesComponent: Component {
                 }
             }
             
-            self.textNode.visibility = true
+            if !component.manualVisibilityControl {
+                self.textNode.visibility = true
+            }
             if let context = component.context, let animationCache = component.animationCache, let animationRenderer = component.animationRenderer, let placeholderColor = component.placeholderColor {
                 self.textNode.arguments = TextNodeWithEntities.Arguments(
                     context: context,

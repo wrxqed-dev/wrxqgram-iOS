@@ -194,6 +194,7 @@ class ReactionChatPreviewItemNode: ListViewItemNode {
                             return
                         }
                         if let itemFile = files[fileId] {
+                            let itemFile = TelegramMediaFile.Accessor(itemFile)
                             let reactionItem = ReactionItem(
                                 reaction: ReactionItem.Reaction(rawValue: .custom(itemFile.fileId.id)),
                                 appearAnimation: itemFile,
@@ -303,7 +304,7 @@ class ReactionChatPreviewItemNode: ListViewItemNode {
             var peers = SimpleDictionary<PeerId, Peer>()
             let messages = SimpleDictionary<MessageId, Message>()
             
-            peers[userPeerId] = TelegramUser(id: userPeerId, accessHash: nil, firstName: item.strings.Settings_QuickReactionSetup_DemoMessageAuthor, lastName: "", username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: .blue, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil)
+            peers[userPeerId] = TelegramUser(id: userPeerId, accessHash: nil, firstName: item.strings.Settings_QuickReactionSetup_DemoMessageAuthor, lastName: "", username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: .blue, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
             
             let messageText = item.strings.Settings_QuickReactionSetup_DemoMessageText
             

@@ -1121,6 +1121,32 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
+        if data.messageActions.options.contains(.sendGift), !message.id.peerId.isTelegramNotifications {
+            let sendGiftTitle: String
+            var isIncoming = message.effectivelyIncoming(context.account.peerId)
+            for media in message.media {
+                if let action = media as? TelegramMediaAction, case let .starGiftUnique(_, isUpgrade, _, _, _, _, _, _, _, _) = action.action {
+                    if isUpgrade && message.author?.id == context.account.peerId {
+                        isIncoming = true
+                    }
+                }
+            }
+            if message.id.peerId == context.account.peerId {
+                sendGiftTitle = chatPresentationInterfaceState.strings.Conversation_ContextMenuBuyGift
+            } else if isIncoming {
+                let peerName = message.peers[message.id.peerId].flatMap(EnginePeer.init)?.compactDisplayTitle ?? ""
+                sendGiftTitle = chatPresentationInterfaceState.strings.Conversation_ContextMenuSendGiftTo(peerName).string
+            } else {
+                sendGiftTitle = chatPresentationInterfaceState.strings.Conversation_ContextMenuSendAnotherGift
+            }
+            actions.append(.action(ContextMenuActionItem(text: sendGiftTitle, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Gift"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                let _ = controllerInteraction.sendGift(message.id.peerId)
+                f(.dismissWithoutContent)
+            })))
+        }
+        
         var isReplyThreadHead = false
         if case let .replyThread(replyThreadMessage) = chatPresentationInterfaceState.chatLocation {
             isReplyThreadHead = messages[0].id == replyThreadMessage.effectiveTopId
@@ -2221,8 +2247,15 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Peer
                             }
                             break
                         }
-                    } else if let action = media as? TelegramMediaAction, case .phoneCall = action.action {
-                        optionsMap[id]!.insert(.rateCall)
+                    } else if let action = media as? TelegramMediaAction {
+                        switch action.action {
+                        case .phoneCall:
+                            optionsMap[id]!.insert(.rateCall)
+                        case .starGift, .starGiftUnique:
+                            optionsMap[id]!.insert(.sendGift)
+                        default:
+                            break
+                        }
                     } else if let story = media as? TelegramMediaStory {
                         if let story = message.associatedStories[story.storyId], story.data.isEmpty {
                             isShareProtected = true
@@ -2820,7 +2853,7 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
                                 }
                                 |> map { result -> StickerPackCollectionInfo? in
                                     if case let .result(info, _, _) = result {
-                                        return info
+                                        return info._parse()
                                     } else {
                                         return nil
                                     }

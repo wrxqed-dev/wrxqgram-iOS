@@ -162,6 +162,9 @@ public final class BrowserBookmarksScreen: ViewController {
             }, openAgeRestrictedMessageMedia: { _, _ in
             }, playMessageEffect: { _ in
             }, editMessageFactCheck: { _ in
+            }, sendGift: { _ in
+            }, openUniqueGift: { _ in
+            }, openMessageFeeException: {  
             }, requestMessageUpdate: { _, _ in
             }, cancelInteractiveKeyboardGestures: {
             }, dismissTextInput: {

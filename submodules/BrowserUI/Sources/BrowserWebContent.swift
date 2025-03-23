@@ -301,9 +301,6 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
         self.webView.addObserver(self, forKeyPath: #keyPath(WKWebView.canGoBack), options: [], context: nil)
         self.webView.addObserver(self, forKeyPath: #keyPath(WKWebView.canGoForward), options: [], context: nil)
         self.webView.addObserver(self, forKeyPath: #keyPath(WKWebView.hasOnlySecureContent), options: [], context: nil)
-        if #available(iOS 15.0, *) {
-            self.webView.underPageBackgroundColor = presentationData.theme.list.plainBackgroundColor
-        }
         if #available(iOS 16.4, *) {
             self.webView.isInspectable = true
         }
@@ -400,7 +397,6 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
         self.presentationData = presentationData
         if #available(iOS 15.0, *) {
             self.backgroundColor = presentationData.theme.list.plainBackgroundColor
-            self.webView.underPageBackgroundColor = presentationData.theme.list.plainBackgroundColor
         }
         if let (size, insets, fullInsets, safeInsets) = self.validLayout {
             self.updateLayout(size: size, insets: insets, fullInsets: fullInsets, safeInsets: safeInsets, transition: .immediate)
@@ -1027,7 +1023,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
                                 }
                                 self.instantPage = webPage
                                 self.instantPageResources = resources
-                                let _ = (updatedRemoteWebpage(postbox: self.context.account.postbox, network: self.context.account.network, accountPeerId: self.context.account.peerId, webPage: WebpageReference(TelegramMediaWebpage(webpageId: MediaId(namespace: 0, id: 0), content: .Loaded(TelegramMediaWebpageLoadedContent(url: self._state.url, displayUrl: "", hash: 0, type: nil, websiteName: nil, title: nil, text: nil, embedUrl: nil, embedType: nil, embedSize: nil, duration: nil, author: nil, isMediaLargeByDefault: nil, image: nil, file: nil, story: nil, attributes: [], instantPage: nil)))))
+                                let _ = (updatedRemoteWebpage(postbox: self.context.account.postbox, network: self.context.account.network, accountPeerId: self.context.account.peerId, webPage: WebpageReference(TelegramMediaWebpage(webpageId: MediaId(namespace: 0, id: 0), content: .Loaded(TelegramMediaWebpageLoadedContent(url: self._state.url, displayUrl: "", hash: 0, type: nil, websiteName: nil, title: nil, text: nil, embedUrl: nil, embedType: nil, embedSize: nil, duration: nil, author: nil, isMediaLargeByDefault: nil, imageIsVideoCover: false, image: nil, file: nil, story: nil, attributes: [], instantPage: nil)))))
                                 |> deliverOnMainQueue).start(next: { [weak self] webPage in
                                     guard let self, let webPage, case let .Loaded(result) = webPage.content, let _ = result.instantPage else {
                                         return
@@ -1522,6 +1518,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
                             duration: nil,
                             author: nil,
                             isMediaLargeByDefault: nil,
+                            imageIsVideoCover: false,
                             image: image,
                             file: nil,
                             story: nil,
@@ -1725,10 +1722,10 @@ function tgBrowserHandleMutations(mutations) {
     if (mutation.addedNodes && mutation.addedNodes.length > 0) {
       mutation.addedNodes.forEach((newNode) => {
         if (newNode.tagName === 'VIDEO') {
-          disableWebkitEnterFullscreen(newNode);
+          tgBrowserDisableWebkitEnterFullscreen(newNode);
         }
         if (newNode.querySelectorAll) {
-          newNode.querySelectorAll('video').forEach(disableWebkitEnterFullscreen);
+          newNode.querySelectorAll('video').forEach(tgBrowserDisableWebkitEnterFullscreen);
         }
       });
     }

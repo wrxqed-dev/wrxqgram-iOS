@@ -744,6 +744,54 @@ public extension Api.messages {
     
     }
 }
+public extension Api.messages {
+    indirect enum WebPagePreview: TypeConstructorDescription {
+        case webPagePreview(media: Api.MessageMedia, users: [Api.User])
+    
+    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
+    switch self {
+                case .webPagePreview(let media, let users):
+                    if boxed {
+                        buffer.appendInt32(-1254192351)
+                    }
+                    media.serialize(buffer, true)
+                    buffer.appendInt32(481674261)
+                    buffer.appendInt32(Int32(users.count))
+                    for item in users {
+                        item.serialize(buffer, true)
+                    }
+                    break
+    }
+    }
+    
+    public func descriptionFields() -> (String, [(String, Any)]) {
+        switch self {
+                case .webPagePreview(let media, let users):
+                return ("webPagePreview", [("media", media as Any), ("users", users as Any)])
+    }
+    }
+    
+        public static func parse_webPagePreview(_ reader: BufferReader) -> WebPagePreview? {
+            var _1: Api.MessageMedia?
+            if let signature = reader.readInt32() {
+                _1 = Api.parse(reader, signature: signature) as? Api.MessageMedia
+            }
+            var _2: [Api.User]?
+            if let _ = reader.readInt32() {
+                _2 = Api.parseVector(reader, elementSignature: 0, elementType: Api.User.self)
+            }
+            let _c1 = _1 != nil
+            let _c2 = _2 != nil
+            if _c1 && _c2 {
+                return Api.messages.WebPagePreview.webPagePreview(media: _1!, users: _2!)
+            }
+            else {
+                return nil
+            }
+        }
+    
+    }
+}
 public extension Api.payments {
     enum BankCardData: TypeConstructorDescription {
         case bankCardData(title: String, openUrls: [Api.BankCardOpenUrl])
@@ -1534,64 +1582,6 @@ public extension Api.payments {
             else {
                 return nil
             }
-        }
-    
-    }
-}
-public extension Api.payments {
-    enum StarGifts: TypeConstructorDescription {
-        case starGifts(hash: Int32, gifts: [Api.StarGift])
-        case starGiftsNotModified
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .starGifts(let hash, let gifts):
-                    if boxed {
-                        buffer.appendInt32(-1877571094)
-                    }
-                    serializeInt32(hash, buffer: buffer, boxed: false)
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(gifts.count))
-                    for item in gifts {
-                        item.serialize(buffer, true)
-                    }
-                    break
-                case .starGiftsNotModified:
-                    if boxed {
-                        buffer.appendInt32(-1551326360)
-                    }
-                    
-                    break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .starGifts(let hash, let gifts):
-                return ("starGifts", [("hash", hash as Any), ("gifts", gifts as Any)])
-                case .starGiftsNotModified:
-                return ("starGiftsNotModified", [])
-    }
-    }
-    
-        public static func parse_starGifts(_ reader: BufferReader) -> StarGifts? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: [Api.StarGift]?
-            if let _ = reader.readInt32() {
-                _2 = Api.parseVector(reader, elementSignature: 0, elementType: Api.StarGift.self)
-            }
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.payments.StarGifts.starGifts(hash: _1!, gifts: _2!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_starGiftsNotModified(_ reader: BufferReader) -> StarGifts? {
-            return Api.payments.StarGifts.starGiftsNotModified
         }
     
     }

@@ -209,6 +209,10 @@ final class GreetingMessageListItemComponent: Component {
                     editPeer: { _ in
                     },
                     openWebApp: { _ in
+                    },
+                    openPhotoSetup: {
+                    },
+                    openAdInfo: { _ in
                     }
                 )
                 self.chatListNodeInteraction = chatListNodeInteraction

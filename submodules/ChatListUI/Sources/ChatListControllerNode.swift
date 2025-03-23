@@ -354,6 +354,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         itemNode.listNode.openWebApp = { [weak self] amount in
             self?.openWebApp?(amount)
         }
+        itemNode.listNode.openPhotoSetup = { [weak self] in
+            self?.openPhotoSetup?()
+        }
         
         self.currentItemStateValue.set(itemNode.listNode.state |> map { state in
             let filterId: Int32?
@@ -421,6 +424,7 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     var openStories: ((ChatListNode.OpenStoriesSubject, ASDisplayNode?) -> Void)?
     var openStarsTopup: ((Int64?) -> Void)?
     var openWebApp: ((TelegramUser) -> Void)?
+    var openPhotoSetup: (() -> Void)?
     var addedVisibleChatsWithPeerIds: (([EnginePeer.Id]) -> Void)?
     var didBeginSelectingChats: (() -> Void)?
     var canExpandHiddenItems: (() -> Bool)?
@@ -1675,6 +1679,9 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         })
         contentNode.dismissSearch = { [weak self] in
             self?.dismissSearch?()
+        }
+        contentNode.openAdInfo = { [weak self] node in
+            self?.controller?.openAdInfo(node)
         }
         
         self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, mode: .list, contentNode: contentNode, cancel: { [weak self] in

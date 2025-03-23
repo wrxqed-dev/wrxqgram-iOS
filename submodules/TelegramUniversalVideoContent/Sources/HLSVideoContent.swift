@@ -16,9 +16,11 @@ import ManagedFile
 import AppBundle
 
 public struct HLSCodecConfiguration {
+    public var isHardwareAv1Supported: Bool
     public var isSoftwareAv1Supported: Bool
     
-    public init(isSoftwareAv1Supported: Bool) {
+    public init(isHardwareAv1Supported: Bool, isSoftwareAv1Supported: Bool) {
+        self.isHardwareAv1Supported = isHardwareAv1Supported
         self.isSoftwareAv1Supported = isSoftwareAv1Supported
     }
 }
@@ -26,6 +28,7 @@ public struct HLSCodecConfiguration {
 public extension HLSCodecConfiguration {
     init(context: AccountContext) {
         var isSoftwareAv1Supported = false
+        var isHardwareAv1Supported = false
         
         var length: Int = 4
         var cpuCount: UInt32 = 0
@@ -34,11 +37,14 @@ public extension HLSCodecConfiguration {
             isSoftwareAv1Supported = true
         }
         
+        if let data = context.currentAppConfiguration.with({ $0 }).data, let value = data["ios_enable_hardware_av1"] as? Double {
+            isHardwareAv1Supported = value != 0.0
+        }
         if let data = context.currentAppConfiguration.with({ $0 }).data, let value = data["ios_enable_software_av1"] as? Double {
             isSoftwareAv1Supported = value != 0.0
         }
         
-        self.init(isSoftwareAv1Supported: isSoftwareAv1Supported)
+        self.init(isHardwareAv1Supported: isHardwareAv1Supported, isSoftwareAv1Supported: isSoftwareAv1Supported)
     }
 }
 
@@ -49,25 +55,24 @@ public final class HLSQualitySet {
     public init?(baseFile: FileMediaReference, codecConfiguration: HLSCodecConfiguration) {
         var qualityFiles: [Int: FileMediaReference] = [:]
         for alternativeRepresentation in baseFile.media.alternativeRepresentations {
-            if let alternativeFile = alternativeRepresentation as? TelegramMediaFile {
-                for attribute in alternativeFile.attributes {
-                    if case let .Video(_, size, _, _, _, videoCodec) = attribute {
-                        if let videoCodec, NativeVideoContent.isVideoCodecSupported(videoCodec: videoCodec, isSoftwareAv1Supported: codecConfiguration.isSoftwareAv1Supported) {
-                            let key = Int(min(size.width, size.height))
-                            if let currentFile = qualityFiles[key] {
-                                var currentCodec: String?
-                                for attribute in currentFile.media.attributes {
-                                    if case let .Video(_, _, _, _, _, videoCodec) = attribute {
-                                        currentCodec = videoCodec
-                                    }
+            let alternativeFile = alternativeRepresentation
+            for attribute in alternativeFile.attributes {
+                if case let .Video(_, size, _, _, _, videoCodec) = attribute {
+                    if let videoCodec, NativeVideoContent.isVideoCodecSupported(videoCodec: videoCodec, isHardwareAv1Supported: codecConfiguration.isHardwareAv1Supported, isSoftwareAv1Supported: codecConfiguration.isSoftwareAv1Supported) {
+                        let key = Int(min(size.width, size.height))
+                        if let currentFile = qualityFiles[key] {
+                            var currentCodec: String?
+                            for attribute in currentFile.media.attributes {
+                                if case let .Video(_, _, _, _, _, videoCodec) = attribute {
+                                    currentCodec = videoCodec
                                 }
-                                if let currentCodec, (currentCodec == "av1" || currentCodec == "av01") {
-                                } else {
-                                    qualityFiles[key] = baseFile.withMedia(alternativeFile)
-                                }
+                            }
+                            if let currentCodec, (currentCodec == "av1" || currentCodec == "av01") {
                             } else {
                                 qualityFiles[key] = baseFile.withMedia(alternativeFile)
                             }
+                        } else {
+                            qualityFiles[key] = baseFile.withMedia(alternativeFile)
                         }
                     }
                 }
@@ -76,17 +81,16 @@ public final class HLSQualitySet {
         
         var playlistFiles: [Int: FileMediaReference] = [:]
         for alternativeRepresentation in baseFile.media.alternativeRepresentations {
-            if let alternativeFile = alternativeRepresentation as? TelegramMediaFile {
-                if alternativeFile.mimeType == "application/x-mpegurl" {
-                    if let fileName = alternativeFile.fileName {
-                        if fileName.hasPrefix("mtproto:") {
-                            let fileIdString = String(fileName[fileName.index(fileName.startIndex, offsetBy: "mtproto:".count)...])
-                            if let fileId = Int64(fileIdString) {
-                                for (quality, file) in qualityFiles {
-                                    if file.media.fileId.id == fileId {
-                                        playlistFiles[quality] = baseFile.withMedia(alternativeFile)
-                                        break
-                                    }
+            let alternativeFile = alternativeRepresentation
+            if alternativeFile.mimeType == "application/x-mpegurl" {
+                if let fileName = alternativeFile.fileName {
+                    if fileName.hasPrefix("mtproto:") {
+                        let fileIdString = String(fileName[fileName.index(fileName.startIndex, offsetBy: "mtproto:".count)...])
+                        if let fileId = Int64(fileIdString) {
+                            for (quality, file) in qualityFiles {
+                                if file.media.fileId.id == fileId {
+                                    playlistFiles[quality] = baseFile.withMedia(alternativeFile)
+                                    break
                                 }
                             }
                         }
@@ -224,7 +228,7 @@ public final class HLSVideoContent: UniversalVideoContent {
     
     public let id: AnyHashable
     public let nativeId: NativeVideoContentId
-    let userLocation: MediaResourceUserLocation
+    public let userLocation: MediaResourceUserLocation
     public let fileReference: FileMediaReference
     public let dimensions: CGSize
     public let duration: Double
@@ -256,8 +260,8 @@ public final class HLSVideoContent: UniversalVideoContent {
         self.codecConfiguration = codecConfiguration
     }
     
-    public func makeContentNode(accountId: AccountRecordId, postbox: Postbox, audioSession: ManagedAudioSession) -> UniversalVideoContentNode & ASDisplayNode {
-        return HLSVideoJSNativeContentNode(accountId: accountId, postbox: postbox, audioSessionManager: audioSession, userLocation: self.userLocation, fileReference: self.fileReference, streamVideo: self.streamVideo, loopVideo: self.loopVideo, enableSound: self.enableSound, baseRate: self.baseRate, fetchAutomatically: self.fetchAutomatically, onlyFullSizeThumbnail: self.onlyFullSizeThumbnail, useLargeThumbnail: self.useLargeThumbnail, autoFetchFullSizeThumbnail: self.autoFetchFullSizeThumbnail, codecConfiguration: self.codecConfiguration)
+    public func makeContentNode(context: AccountContext, postbox: Postbox, audioSession: ManagedAudioSession) -> UniversalVideoContentNode & ASDisplayNode {
+        return HLSVideoJSNativeContentNode(context: context, postbox: postbox, audioSessionManager: audioSession, userLocation: self.userLocation, fileReference: self.fileReference, streamVideo: self.streamVideo, loopVideo: self.loopVideo, enableSound: self.enableSound, baseRate: self.baseRate, fetchAutomatically: self.fetchAutomatically, onlyFullSizeThumbnail: self.onlyFullSizeThumbnail, useLargeThumbnail: self.useLargeThumbnail, autoFetchFullSizeThumbnail: self.autoFetchFullSizeThumbnail, codecConfiguration: self.codecConfiguration)
     }
     
     public func isEqual(to other: UniversalVideoContent) -> Bool {

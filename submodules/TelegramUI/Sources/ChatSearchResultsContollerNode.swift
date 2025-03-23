@@ -294,6 +294,8 @@ class ChatSearchResultsControllerNode: ViewControllerTracingNode, ASScrollViewDe
         }, dismissNotice: { _ in
         }, editPeer: { _ in
         }, openWebApp: { _ in
+        }, openPhotoSetup: {
+        }, openAdInfo: { _ in
         })
         interaction.searchTextHighightState = searchQuery
         self.interaction = interaction

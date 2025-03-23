@@ -265,6 +265,24 @@ public struct PresentationResourcesChatList {
         })
     }
     
+    public static func locationIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.chatListLocationIcon.rawValue, { theme in
+            if let image =  UIImage(bundleImageName: "Chat/Attach Menu/Location") {
+                return generateImage(CGSize(width: 20.0, height: 20.0), contextGenerator: { size, context in
+                    if let cgImage = image.cgImage {
+                        context.clear(CGRect(origin: CGPoint(), size: size))
+                       
+                        context.clip(to: CGRect(origin: .zero, size: size), mask: cgImage)
+                        context.setFillColor(theme.chatList.muteIconColor.cgColor)
+                        context.fill(CGRect(origin: CGPoint(), size: size))
+                    }
+                })
+            } else {
+                return nil
+            }
+        })
+    }
+    
     public static func verifiedIcon(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.chatListVerifiedIcon.rawValue, { theme in
             if let backgroundImage = UIImage(bundleImageName: "Chat List/PeerVerifiedIconBackground"), let foregroundImage = UIImage(bundleImageName: "Chat List/PeerVerifiedIconForeground") {
@@ -467,6 +485,29 @@ public struct PresentationResourcesChatList {
     public static func shareAvatarPremiumLockBadgeBackground(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.shareAvatarPremiumLockBadgeBackground.rawValue, { theme in
             return generateFilledCircleImage(diameter: 22.0, color: .white)?.withRenderingMode(.alwaysTemplate)
+        })
+    }
+    
+    public static func shareAvatarStarsLockBadgeBackground(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.shareAvatarStarsLockBadgeBackground.rawValue, { theme in
+            return generateImage(CGSize(width: 20.0, height: 20.0), contextGenerator: { size, context in
+                context.clear(CGRect(origin: .zero, size: size))
+                context.setFillColor(UIColor.white.cgColor)
+                let rect = CGRect(origin: .zero, size: CGSize(width: 20.0, height: 18.0 + UIScreenPixel)).insetBy(dx: 1.0 - UIScreenPixel, dy: 0.0)
+                context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: rect.height / 2.0).cgPath)
+                context.fillPath()
+            })?.withRenderingMode(.alwaysTemplate).stretchableImage(withLeftCapWidth: 10, topCapHeight: 10)
+        })
+    }
+    
+    public static func shareAvatarStarsLockBadgeInnerBackground(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.shareAvatarStarsLockBadgeInnerBackground.rawValue, { theme in
+            return generateImage(CGSize(width: 20.0, height: 16.0), contextGenerator: { size, context in
+                context.clear(CGRect(origin: .zero, size: size))
+                context.setFillColor(UIColor.white.cgColor)
+                context.addPath(UIBezierPath(roundedRect: CGRect(origin: .zero, size: CGSize(width: 20.0, height: 15.0)), cornerRadius: 7.5).cgPath)
+                context.fillPath()
+            })?.withRenderingMode(.alwaysTemplate).stretchableImage(withLeftCapWidth: 10, topCapHeight: 0)
         })
     }
     

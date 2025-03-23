@@ -141,7 +141,7 @@ const CGFloat TGPhotoEditorSliderViewInternalMargin = 7.0f;
     if (vertical)
         startPosition = 2 * visualMargin + visualTotalLength - startPosition;
     
-    CGFloat endPosition = visualMargin + visualTotalLength / (_maximumValue - _minimumValue) * (ABS(_minimumValue) + 1.0);
+    CGFloat endPosition = visualMargin + visualTotalLength / (_maximumValue - _minimumValue) * (ABS(_minimumValue) + _maximumValue);
     if (vertical)
         endPosition = 2 * visualMargin + visualTotalLength - endPosition;
     
@@ -381,7 +381,11 @@ const CGFloat TGPhotoEditorSliderViewInternalMargin = 7.0f;
 
 - (void)setValue:(CGFloat)value animated:(BOOL)__unused animated
 {
-    _value = MIN(MAX(_lowerBoundValue, MAX(value, _minimumValue)), _maximumValue);
+    if (_lowerBoundValue > FLT_EPSILON) {
+        _value = MIN(MAX(_lowerBoundValue, MAX(value, _minimumValue)), _maximumValue);
+    } else {
+        _value = MIN(MAX(value, _minimumValue), _maximumValue);
+    }
     [self setNeedsLayout];
 }
 

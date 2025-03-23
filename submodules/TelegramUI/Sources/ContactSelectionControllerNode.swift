@@ -23,6 +23,7 @@ final class ContactSelectionControllerNode: ASDisplayNode {
     
     private let displayDeviceContacts: Bool
     private let displayCallIcons: Bool
+    private let allowChannelsInSearch: Bool
     private let filters: [ContactListFilter]
     
     let contactListNode: ContactListNode
@@ -56,23 +57,20 @@ final class ContactSelectionControllerNode: ASDisplayNode {
     
     var searchContainerNode: ContactsSearchContainerNode?
     
-    init(context: AccountContext, mode: ContactSelectionControllerMode, presentationData: PresentationData, options: Signal<[ContactListAdditionalOption], NoError>, displayDeviceContacts: Bool, displayCallIcons: Bool, multipleSelection: Bool, requirePhoneNumbers: Bool) {
+    init(context: AccountContext, mode: ContactSelectionControllerMode, presentationData: PresentationData, options: Signal<[ContactListAdditionalOption], NoError>, displayDeviceContacts: Bool, displayCallIcons: Bool, multipleSelection: Bool, requirePhoneNumbers: Bool, allowChannelsInSearch: Bool) {
         self.context = context
         self.presentationData = presentationData
         self.displayDeviceContacts = displayDeviceContacts
         self.displayCallIcons = displayCallIcons
+        self.allowChannelsInSearch = allowChannelsInSearch
         
-        var filters: [ContactListFilter] = [.excludeSelf]
-        if requirePhoneNumbers {
-            filters.append(.excludeWithoutPhoneNumbers)
-        }
-        if case .starsGifting = mode {
-            filters.append(.excludeBots)
-        }
-        self.filters = filters
+        var excludeSelf = true
         
         let displayTopPeers: ContactListPresentation.TopPeers
-        if case let .starsGifting(birthdays, hasActions) = mode {
+        if case let .starsGifting(birthdays, hasActions, showSelf, selfSubtitle) = mode {
+            if showSelf {
+                excludeSelf = false
+            }
             if let birthdays {
                 let today = Calendar(identifier: .gregorian).component(.day, from: Date())
                 var sections: [(String, [EnginePeer.Id], Bool)] = []
@@ -100,13 +98,25 @@ final class ContactSelectionControllerNode: ASDisplayNode {
                     sections.append((presentationData.strings.Premium_Gift_ContactSelection_BirthdayTomorrow, tomorrowPeers, hasActions))
                 }
                 
-                displayTopPeers = .custom(sections)
+                displayTopPeers = .custom(showSelf: showSelf, selfSubtitle: selfSubtitle, sections: sections)
             } else {
                 displayTopPeers = .recent
             }
         } else {
             displayTopPeers = .none
         }
+        
+        var filters: [ContactListFilter] = []
+        if excludeSelf {
+            filters.append(.excludeSelf)
+        }
+        if requirePhoneNumbers {
+            filters.append(.excludeWithoutPhoneNumbers)
+        }
+        if case .starsGifting = mode {
+            filters.append(.excludeBots)
+        }
+        self.filters = filters
         
         let presentation: Signal<ContactListPresentation, NoError> = options
         |> map { options in
@@ -239,6 +249,9 @@ final class ContactSelectionControllerNode: ASDisplayNode {
         } else {
             categories.insert(.global)
         }
+        if self.allowChannelsInSearch {
+            categories.insert(.channels)
+        }
         
         let searchContainerNode = ContactsSearchContainerNode(context: self.context, updatedPresentationData: (self.presentationData, self.presentationDataPromise.get()), onlyWriteable: false, categories: categories, filters: self.filters, addContact: nil, openPeer: { [weak self] peer in
             if let strongSelf = self {
@@ -308,6 +321,10 @@ final class ContactSelectionControllerNode: ASDisplayNode {
         } else {
             categories.insert(.global)
         }
+        if self.allowChannelsInSearch {
+            categories.insert(.channels)
+        }
+        
         self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, updatedPresentationData: (self.presentationData, self.presentationDataPromise.get()), onlyWriteable: false, categories: categories, filters: self.filters, addContact: nil, openPeer: { [weak self] peer in
             if let strongSelf = self {
                 var updated = false
