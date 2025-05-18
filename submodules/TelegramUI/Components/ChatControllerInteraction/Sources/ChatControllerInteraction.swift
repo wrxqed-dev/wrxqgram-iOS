@@ -208,6 +208,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public let chatControllerNode: () -> ASDisplayNode?
     public let presentGlobalOverlayController: (ViewController, Any?) -> Void
     public let callPeer: (PeerId, Bool) -> Void
+    public let openConferenceCall: (Message) -> Void
     public let longTap: (ChatControllerInteractionLongTapAction, LongTapParams?) -> Void
     public let openCheckoutOrReceipt: (MessageId, OpenMessageParams?) -> Void
     public let openSearch: () -> Void
@@ -279,6 +280,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public let attemptedNavigationToPrivateQuote: (Peer?) -> Void
     public let forceUpdateWarpContents: () -> Void
     public let playShakeAnimation:  () -> Void
+    public let displayQuickShare: (MessageId, ASDisplayNode, ContextGesture) -> Void
     
     public var canPlayMedia: Bool = false
     public var hiddenMedia: [MessageId: [Media]] = [:]
@@ -367,6 +369,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
         chatControllerNode: @escaping () -> ASDisplayNode?,
         presentGlobalOverlayController: @escaping (ViewController, Any?) -> Void,
         callPeer: @escaping (PeerId, Bool) -> Void,
+        openConferenceCall: @escaping (Message) -> Void,
         longTap: @escaping (ChatControllerInteractionLongTapAction, LongTapParams?) -> Void,
         openCheckoutOrReceipt: @escaping (MessageId, OpenMessageParams?) -> Void,
         openSearch: @escaping () -> Void,
@@ -437,6 +440,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
         attemptedNavigationToPrivateQuote: @escaping (Peer?) -> Void,
         forceUpdateWarpContents: @escaping () -> Void,
         playShakeAnimation: @escaping () -> Void,
+        displayQuickShare: @escaping (MessageId, ASDisplayNode, ContextGesture) -> Void,
         automaticMediaDownloadSettings: MediaAutoDownloadSettings,
         pollActionState: ChatInterfacePollActionState,
         stickerSettings: ChatInterfaceStickerSettings,
@@ -482,6 +486,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
         self.chatControllerNode = chatControllerNode
         self.presentGlobalOverlayController = presentGlobalOverlayController
         self.callPeer = callPeer
+        self.openConferenceCall = openConferenceCall
         self.longTap = longTap
         self.openCheckoutOrReceipt = openCheckoutOrReceipt
         self.openSearch = openSearch
@@ -553,6 +558,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
         self.attemptedNavigationToPrivateQuote = attemptedNavigationToPrivateQuote
         self.forceUpdateWarpContents = forceUpdateWarpContents
         self.playShakeAnimation = playShakeAnimation
+        self.displayQuickShare = displayQuickShare
         
         self.automaticMediaDownloadSettings = automaticMediaDownloadSettings
         

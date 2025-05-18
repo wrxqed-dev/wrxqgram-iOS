@@ -132,6 +132,10 @@ extension ChatControllerImpl {
         case .cancelMessageSelection:
             self.updateChatPresentationInterfaceState(animated: true, interactive: true, { $0.updatedInterfaceState { $0.withoutSelectionState() } })
         case .clearHistory:
+            guard !self.presentAccountFrozenInfoIfNeeded() else {
+                return
+            }
+            
             if case let .peer(peerId) = self.chatLocation {
                 let beginClear: (InteractiveHistoryClearingType) -> Void = { [weak self] type in
                     self?.beginClearHistory(type: type)
@@ -414,7 +418,7 @@ extension ChatControllerImpl {
                                 }
                             }
                             
-                            strongSelf.dismissPreviewing?()
+                            let _ = strongSelf.dismissPreviewing?(false)
                         }
                     }))
                 case .replyThread:

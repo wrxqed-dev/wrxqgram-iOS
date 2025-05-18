@@ -348,7 +348,7 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
                         internalId: firstState.2.id,
                         peerId: firstState.2.peerId,
                         isOutgoing: false,
-                        isIncomingConference: firstState.2.isIncomingConference,
+                        incomingConferenceSource: firstState.2.conferenceSource,
                         peer: EnginePeer(firstState.1),
                         proxyServer: strongSelf.proxyServer,
                         auxiliaryServers: [],
@@ -571,7 +571,7 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
             |> mapToSignal { areVideoCallsAvailable -> Signal<CallSessionInternalId, NoError> in
                 let isVideoPossible: Bool = areVideoCallsAvailable
                 
-                return context.account.callSessionManager.request(peerId: peerId, isVideo: isVideo, enableVideo: isVideoPossible, conferenceCall: nil, internalId: internalId)
+                return context.account.callSessionManager.request(peerId: peerId, isVideo: isVideo, enableVideo: isVideoPossible, internalId: internalId)
             }
             
             return (combineLatest(queue: .mainQueue(),
@@ -616,7 +616,7 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
                         internalId: internalId,
                         peerId: peerId,
                         isOutgoing: true,
-                        isIncomingConference: false,
+                        incomingConferenceSource: nil,
                         peer: nil,
                         proxyServer: strongSelf.proxyServer,
                         auxiliaryServers: [],
@@ -847,10 +847,10 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
                             invite: nil,
                             joinAsPeerId: nil,
                             isStream: false,
-                            encryptionKey: nil,
-                            conferenceFromCallId: nil,
+                            keyPair: nil,
                             conferenceSourceId: nil,
                             isConference: false,
+                            beginWithVideo: false,
                             sharedAudioContext: nil
                         )
                         call.schedule(timestamp: timestamp)
@@ -973,10 +973,6 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
         return .joined
     }
     
-    public func switchToConference(call: PresentationCall) {
-        
-    }
-    
     private func startGroupCall(
         accountContext: AccountContext,
         peerId: PeerId,
@@ -1067,19 +1063,56 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
             audioSession: self.audioSession,
             callKitIntegration: nil,
             getDeviceAccessData: self.getDeviceAccessData,
-            initialCall: initialCall,
+            initialCall: (initialCall, .id(id: initialCall.id, accessHash: initialCall.accessHash)),
             internalId: internalId,
             peerId: peerId,
             isChannel: isChannel,
             invite: invite,
             joinAsPeerId: joinAsPeerId,
             isStream: initialCall.isStream ?? false,
-            encryptionKey: nil,
-            conferenceFromCallId: nil,
+            keyPair: nil,
             conferenceSourceId: nil,
             isConference: false,
+            beginWithVideo: false,
             sharedAudioContext: nil
         )
+        self.updateCurrentGroupCall(.group(call))
+    }
+    
+    public func joinConferenceCall(
+        accountContext: AccountContext,
+        initialCall: EngineGroupCallDescription,
+        reference: InternalGroupCallReference,
+        beginWithVideo: Bool,
+        invitePeerIds: [EnginePeer.Id]
+    ) {
+        let keyPair: TelegramKeyPair
+        guard let keyPairValue = TelegramE2EEncryptionProviderImpl.shared.generateKeyPair() else {
+            return
+        }
+        keyPair = keyPairValue
+        
+        let call = PresentationGroupCallImpl(
+            accountContext: accountContext,
+            audioSession: self.audioSession,
+            callKitIntegration: nil,
+            getDeviceAccessData: self.getDeviceAccessData,
+            initialCall: (initialCall, reference),
+            internalId: CallSessionInternalId(),
+            peerId: nil,
+            isChannel: false,
+            invite: nil,
+            joinAsPeerId: nil,
+            isStream: false,
+            keyPair: keyPair,
+            conferenceSourceId: nil,
+            isConference: true,
+            beginWithVideo: beginWithVideo,
+            sharedAudioContext: nil
+        )
+        for peerId in invitePeerIds {
+            let _ = call.invitePeer(peerId, isVideo: beginWithVideo)
+        }
         self.updateCurrentGroupCall(.group(call))
     }
 }
